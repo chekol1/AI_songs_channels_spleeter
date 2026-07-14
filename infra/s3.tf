@@ -1,7 +1,8 @@
 data "aws_caller_identity" "current" {}
 
 resource "aws_s3_bucket" "music_storage" {
-  bucket = "sonic-cloud-music-${data.aws_caller_identity.current.account_id}"
+  bucket        = "sonic-cloud-music-${data.aws_caller_identity.current.account_id}"
+  force_destroy = true # allow terraform destroy even when the bucket has files
 
   tags = {
     Name        = "Music Storage"
@@ -23,7 +24,8 @@ output "bucket_name" {
 }
 
 resource "aws_s3_bucket" "music_storage_results" {
-  bucket = "sonic-cloud-music-results-${data.aws_caller_identity.current.account_id}"
+  bucket        = "sonic-cloud-music-results-${data.aws_caller_identity.current.account_id}"
+  force_destroy = true # allow terraform destroy even when the bucket has files
 
   tags = {
     Name        = "Music Storage Results"
