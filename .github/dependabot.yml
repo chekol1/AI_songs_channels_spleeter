@@ -1,0 +1,33 @@
+# Dependabot config - scan every package ecosystem in the repo
+# and open upgrade PRs against the eks-showcase branch.
+version: 2
+updates:
+  - package-ecosystem: "pip"            # api/requirements.txt
+    directory: "/api"
+    target-branch: "eks-showcase"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "pip"            # app/requirements.txt (worker)
+    directory: "/app"
+    target-branch: "eks-showcase"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "npm"            # web/package.json
+    directory: "/web"
+    target-branch: "eks-showcase"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "docker"         # base images in Dockerfiles
+    directories: ["/api", "/app", "/web"]
+    target-branch: "eks-showcase"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "terraform"      # provider versions in infra/
+    directory: "/infra"
+    target-branch: "eks-showcase"
+    schedule:
+      interval: "weekly"
