@@ -1,0 +1,57 @@
+# Local test environment: FE + BE + DB run locally in containers.
+# S3 + SQS are the REAL AWS resources (created by the repo's existing Terraform).
+# Fill .env by running ./run_local.sh (it will prompt for everything).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: sonicloud
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-localdev123}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d sonicloud"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
+  # named "api-service" on purpose - web/nginx.conf proxies to this exact
+  # hostname, so the same nginx config works in both compose and Kubernetes
+  api-service:
+    build: ./api
+    environment:
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      UPLOAD_BUCKET: ${UPLOAD_BUCKET}
+      RESULTS_BUCKET: ${RESULTS_BUCKET}
+      DB_HOST: postgres
+      DB_PASSWORD: ${DB_PASSWORD:-localdev123}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "5000:5000"   # optional: direct API access for curl/debugging
+
+  web:
+    build: ./web
+    ports:
+      - "8080:80"
+    depends_on:
+      - api-service
+
+  worker:
+    build: ./worker
+    environment:
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      QUEUE_URL: ${QUEUE_URL}
+      RESULT_BUCKET: ${RESULTS_BUCKET}
+
+volumes:
+  pgdata:

@@ -1,0 +1,59 @@
+# App tier (BE) - Flask API
+# Replace 010686621615 before applying (or use the sed command in DEPLOY_GUIDE.md)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: sonicloud
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+        - name: api
+          image: 010686621615.dkr.ecr.us-east-1.amazonaws.com/sonicloud-api:latest
+          ports:
+            - containerPort: 5000
+          env:
+            - name: AWS_REGION
+              value: us-east-1
+            - name: UPLOAD_BUCKET
+              value: sonic-cloud-music-010686621615
+            - name: RESULTS_BUCKET
+              value: sonic-cloud-music-results-010686621615
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef: { name: sonicloud-secrets, key: db_host }
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: sonicloud-secrets, key: db_password }
+          readinessProbe:
+            httpGet: { path: /api/health, port: 5000 }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /api/health, port: 5000 }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-service   # nginx.conf proxies to this name
+  namespace: sonicloud
+spec:
+  type: ClusterIP
+  selector:
+    app: api
+  ports:
+    - port: 5000
+      targetPort: 5000

@@ -1,0 +1,30 @@
+# Spleeter worker - background processor (no Service: it serves no requests,
+# it only polls SQS). Replace 010686621615 before applying.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: sonicloud
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      containers:
+        - name: worker
+          image: 010686621615.dkr.ecr.us-east-1.amazonaws.com/sonicloud-worker:latest
+          env:
+            - name: AWS_REGION
+              value: us-east-1
+            - name: QUEUE_URL
+              value: https://sqs.us-east-1.amazonaws.com/010686621615/music-jobs-queue
+            - name: RESULT_BUCKET
+              value: sonic-cloud-music-results-010686621615
+          resources:
+            requests: { cpu: 500m, memory: 2Gi }
+            limits: { cpu: "2", memory: 6Gi }   # spleeter/TensorFlow is hungry (OOMKilled at 3Gi)

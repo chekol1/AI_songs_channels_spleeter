@@ -1,0 +1,38 @@
+# Web tier (FE) - React served by nginx, exposed to the internet via ELB
+# Replace 010686621615 before applying (or use the sed command in DEPLOY_GUIDE.md)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: sonicloud
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+        - name: web
+          image: 010686621615.dkr.ecr.us-east-1.amazonaws.com/sonicloud-web:latest
+          ports:
+            - containerPort: 80
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 250m, memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-service
+  namespace: sonicloud
+spec:
+  type: LoadBalancer   # <-- public entry point to the app
+  selector:
+    app: web
+  ports:
+    - port: 80
+      targetPort: 80
