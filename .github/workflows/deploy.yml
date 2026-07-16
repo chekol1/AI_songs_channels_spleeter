@@ -1,0 +1,98 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [eks-showcase]
+    paths: ["api/**", "web/**", "app/**"]
+  workflow_dispatch: {}   # manual run = rebuild everything
+
+permissions:
+  id-token: write   # required for OIDC
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ACCOUNT_ID: "010686621615"
+
+jobs:
+  # ---- Job 1: which components actually changed? ----
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      components: ${{ steps.set.outputs.components }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'api/**'
+            web:
+              - 'web/**'
+            worker:
+              - 'app/**'
+
+      - id: set
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo 'components=["api","web","worker"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'components=${{ steps.filter.outputs.changes }}' >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---- Job 2: build & deploy ONLY the changed components (in parallel) ----
+  build-and-deploy:
+    needs: changes
+    if: needs.changes.outputs.components != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: ${{ fromJSON(needs.changes.outputs.components) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Map component -> source dir + ECR repo
+        id: map
+        run: |
+          case "${{ matrix.component }}" in
+            api)    echo "dir=api" >> "$GITHUB_OUTPUT"; echo "repo=sonicloud-api"    >> "$GITHUB_OUTPUT" ;;
+            web)    echo "dir=web" >> "$GITHUB_OUTPUT"; echo "repo=sonicloud-web"    >> "$GITHUB_OUTPUT" ;;
+            worker) echo "dir=app" >> "$GITHUB_OUTPUT"; echo "repo=sonicloud-worker" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Assume AWS role via OIDC (no stored keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::010686621615:role/sonicloud-github-actions
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check infra exists (skip gracefully when destroyed)
+        id: infra
+        run: |
+          if aws ecr describe-repositories --repository-names "${{ steps.map.outputs.repo }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Infra is destroyed - nothing to build/deploy. Skipping."
+          fi
+
+      - name: Build & push ${{ matrix.component }}
+        if: steps.infra.outputs.exists == 'true'
+        run: |
+          REGISTRY=$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+          aws ecr get-login-password --region $AWS_REGION \
+            | docker login --username AWS --password-stdin $REGISTRY
+          docker build --pull \
+            -t $REGISTRY/${{ steps.map.outputs.repo }}:latest \
+            -t $REGISTRY/${{ steps.map.outputs.repo }}:${GITHUB_SHA::7} \
+            ./${{ steps.map.outputs.dir }}
+          docker push --all-tags $REGISTRY/${{ steps.map.outputs.repo }}
+
+      - name: Rolling deploy ${{ matrix.component }}
+        if: steps.infra.outputs.exists == 'true'
+        run: |
+          aws eks update-kubeconfig --region $AWS_REGION --name sonicloud-eks
+          kubectl rollout restart deployment/${{ matrix.component }} -n sonicloud
+          kubectl rollout status  deployment/${{ matrix.component }} -n sonicloud --timeout=10m
