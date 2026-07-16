@@ -1,0 +1,26 @@
+# ArgoCD Application: "watch the k8s/ folder on the eks-showcase branch
+# and keep the cluster in sync with it."
+# Apply once after terraform: kubectl apply -f argocd/sonicloud-app.yaml
+#
+# NOTE: lives in its own folder (not k8s/) so ArgoCD doesn't manage
+# its own definition recursively.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: sonicloud
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/chekol1/AI_songs_channels_spleeter.git
+    targetRevision: eks-showcase
+    path: k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: sonicloud
+  syncPolicy:
+    automated:
+      prune: false     # never auto-delete resources
+      selfHeal: false  # don't revert manual changes (the CI's rollout-restart must survive)
+    syncOptions:
+      - CreateNamespace=true

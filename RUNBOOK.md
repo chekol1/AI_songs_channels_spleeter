@@ -37,12 +37,18 @@ kubectl create secret generic sonicloud-secrets -n sonicloud \
   --from-literal=db_host="$(cd infra && terraform output -raw db_endpoint)" \
   --from-literal=db_password="$(cd infra && terraform output -raw db_password)"
 
-# 5. Deploy the app
-kubectl apply -f k8s/api.yaml -f k8s/web.yaml -f k8s/worker.yaml
+# 5. Deploy the app - GitOps way: ArgoCD syncs k8s/ from GitHub
+kubectl apply -f argocd/sonicloud-app.yaml
 kubectl get pods -n sonicloud -w        # wait for all Running, Ctrl+C
+#    (manual alternative: kubectl apply -f k8s/api.yaml -f k8s/web.yaml -f k8s/worker.yaml)
 
 # 6. Public URL (appears after ~3 min)
 kubectl get svc web-service -n sonicloud    # EXTERNAL-IP → open http://<it>
+
+# 7. ArgoCD UI - URL is in the terraform outputs (self-signed cert: accept the browser warning)
+cd infra && terraform output argocd_url
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
+# login: admin / <that password>
 ```
 
 Smoke test: upload an `.mp3` (mp3 only — the S3 notification filter ignores other
