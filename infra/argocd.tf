@@ -4,19 +4,7 @@
 # UI exposed through a LoadBalancer and printed as an output.
 # ---------------------------------------------------------------
 
-terraform {
-  required_providers {
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 2.17"
-    }
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.35"
-    }
-  }
-}
-
+# (provider requirements live in main.tf - one required_providers block per module)
 # Both providers authenticate against the EKS cluster Terraform just created
 provider "helm" {
   kubernetes {
