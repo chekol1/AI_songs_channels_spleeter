@@ -88,6 +88,22 @@ resource "aws_eks_access_policy_association" "github_actions_admin" {
   }
 }
 
+# Cluster admin access for the human operator (the terraform/CLI user)
+resource "aws_eks_access_entry" "admin_user" {
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/sonicloud-admin"
+}
+
+resource "aws_eks_access_policy_association" "admin_user" {
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/sonicloud-admin"
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+}
+
 output "github_actions_role_arn" {
   value = aws_iam_role.github_actions.arn
 }
