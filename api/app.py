@@ -9,6 +9,7 @@ Endpoints:
 import os
 import time
 
+
 import boto3
 import psycopg2
 from flask import Flask, jsonify, request
