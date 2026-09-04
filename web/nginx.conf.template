@@ -1,0 +1,47 @@
+# Processed at container start by the nginx image's
+# /docker-entrypoint.d/20-envsubst-on-templates.sh.
+#
+# This used to be a plain conf with
+#     proxy_pass http://api-service:5000;
+# nginx resolves a literal upstream hostname ONCE, at startup, and exits if it
+# cannot be resolved:
+#     [emerg] host not found in upstream "api-service"
+# A pod that starts before CoreDNS is ready therefore CrashLoopBackOffs.
+#
+# Fix: resolve per-request via a variable + resolver. ${NGINX_LOCAL_RESOLVERS}
+# is exported by the image's own 15-local-resolvers.envsh from the container's
+# /etc/resolv.conf, so it is the cluster DNS in k8s and docker's DNS in compose.
+#
+# NOTE: when proxy_pass uses a variable, nginx does NOT append the request URI
+# automatically -- hence the explicit $request_uri, which preserves the exact
+# behaviour of the original literal proxy_pass.
+server {
+    listen 80;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    location /api/ {
+        resolver ${NGINX_LOCAL_RESOLVERS} valid=10s ipv6=off;
+        # ${API_UPSTREAM} is injected at container start (see Dockerfile).
+        # It MUST be a fully-qualified name under Kubernetes: nginx's resolver
+        # does NOT apply the search domains in /etc/resolv.conf, so the short
+        # name "api-service" fails with:
+        #   api-service could not be resolved (3: Host not found)
+        # even though the pod's own DNS resolves it fine.
+        set $api_upstream ${API_UPSTREAM};
+        proxy_pass $api_upstream$request_uri;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+
+        # separating a full song can take a while
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+
+    location / {
+        try_files $uri /index.html;
+    }
+}

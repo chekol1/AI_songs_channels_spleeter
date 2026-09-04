@@ -18,6 +18,13 @@ spec:
       containers:
         - name: web
           image: 010686621615.dkr.ecr.us-east-1.amazonaws.com/sonicloud-web:latest
+          env:
+            # nginx now resolves its upstream per-request, and its resolver does
+            # NOT apply the search domains in /etc/resolv.conf -- so this must be
+            # a fully-qualified name or requests fail with:
+            #   api-service could not be resolved (3: Host not found)
+            - name: API_UPSTREAM
+              value: http://api-service.sonicloud.svc.cluster.local:5000
           ports:
             - containerPort: 80
           resources:
