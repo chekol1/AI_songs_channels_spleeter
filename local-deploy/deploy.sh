@@ -105,9 +105,19 @@ else
           | grep -q "\"$tag\""; then
       c_ok "sonicloud-$svc up to date ($tag)"
     else
-      c_info "building sonicloud-$svc ($tag) -- worker is ~4.3GB with TensorFlow, be patient ..."
-      docker build -q -t "sonicloud-$svc:local" "$REPO_ROOT/$svc" >/dev/null \
-        || die "build failed for $svc"
+      if [ "$svc" = worker ]; then
+        c_info "building sonicloud-$svc ($tag) -- ~4.3GB with TensorFlow, this takes a while ..."
+      else
+        c_info "building sonicloud-$svc ($tag) ..."
+      fi
+      # NOTE: -q hides the build output, so a failure shows only "exit code N"
+      # with no cause. On failure, replay verbosely before giving up -- apt and
+      # pip failures here are often transient network blips worth retrying once.
+      if ! docker build -q -t "sonicloud-$svc:local" "$REPO_ROOT/$svc" >/dev/null 2>&1; then
+        c_warn "build failed for $svc -- retrying once with full output"
+        docker build --progress=plain -t "sonicloud-$svc:local" "$REPO_ROOT/$svc" \
+          || die "build failed for $svc (see the output above)"
+      fi
       c_ok "sonicloud-$svc built"
     fi
     # Always (re)publish both tags: cheap when the layers already exist, and it

@@ -6,6 +6,7 @@ Endpoints:
   GET  /api/jobs                - list jobs (auto-refreshes status from results bucket)
   GET  /api/jobs/<id>/download  - presigned URL for the finished stems zip
 """
+import json
 import os
 import time
 
@@ -106,6 +107,19 @@ def create_job():
     return jsonify(id=job_id, upload_url=upload_url), 201
 
 
+def _read_stage(song_name):
+    """Read the progress object the worker publishes for this song.
+
+    The worker writes status/<song>.json to the results bucket at each stage.
+    Absent means nothing has picked the job up yet, so it is still queued.
+    """
+    try:
+        obj = s3.get_object(Bucket=RESULTS_BUCKET, Key=f"status/{song_name}.json")
+        return json.loads(obj["Body"].read())
+    except Exception:
+        return None
+
+
 def _result_ready(song_name):
     try:
         s3.head_object(Bucket=RESULTS_BUCKET, Key=f"finished/{song_name}.zip")
@@ -126,9 +140,32 @@ def list_jobs():
             if status == "processing" and _result_ready(song_name):
                 cur.execute("UPDATE jobs SET status = 'done' WHERE id = %s", (job_id,))
                 status = "done"
+
+            # Surface the worker's per-stage progress so the UI can show more
+            # than an opaque "processing" for the whole run.
+            st = _read_stage(song_name)
+            if status == "done":
+                # Still read the worker's record so a finished job can show how
+                # long it actually took, rather than dropping that on the floor.
+                stage, label, percent = "done", "Finished", 100
+                detail = st.get("detail") if st else None
+                elapsed = st.get("elapsed_seconds") if st else None
+            elif st:
+                stage = st.get("stage", "processing")
+                label = st.get("label", "Processing")
+                percent = st.get("percent", 0)
+                detail = st.get("detail")
+                elapsed = st.get("elapsed_seconds")
+            else:
+                stage, label, percent, detail = "queued", "Waiting for a worker", 5, None
+                elapsed = None
+
             jobs.append({
                 "id": job_id, "filename": filename, "song_name": song_name,
                 "status": status, "created_at": created_at.isoformat(),
+                "stage": stage, "stage_label": label,
+                "percent": percent, "stage_detail": detail,
+                "elapsed_seconds": elapsed,
             })
     return jsonify(jobs)
 
