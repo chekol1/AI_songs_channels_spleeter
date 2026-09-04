@@ -21,6 +21,9 @@ UPLOAD_BUCKET = os.environ["UPLOAD_BUCKET"]          # sonic-cloud-music-<accoun
 RESULTS_BUCKET = os.environ["RESULTS_BUCKET"]        # sonic-cloud-music-results-<account_id>
 
 DB_HOST = os.environ["DB_HOST"]
+# LOCAL-DEPLOY FIX: the port was not configurable, so the app could only ever
+# reach a Postgres on 5432. Defaults to 5432, so nothing changes on real AWS.
+DB_PORT = int(os.environ.get("DB_PORT", "5432"))
 DB_NAME = os.environ.get("DB_NAME", "sonicloud")
 DB_USER = os.environ.get("DB_USER", "appuser")
 DB_PASSWORD = os.environ["DB_PASSWORD"]
@@ -30,7 +33,7 @@ s3 = boto3.client("s3", region_name=AWS_REGION)
 
 def get_conn():
     return psycopg2.connect(
-        host=DB_HOST, dbname=DB_NAME, user=DB_USER,
+        host=DB_HOST, port=DB_PORT, dbname=DB_NAME, user=DB_USER,
         password=DB_PASSWORD, connect_timeout=5,
     )
 
@@ -57,13 +60,31 @@ def init_db(retries=10, delay=5):
     raise RuntimeError("Could not initialize database")
 
 
+_db_ready = False
+
+
+def ensure_db():
+    """LOCAL-DEPLOY FIX: initialise on first use, not at import.
+
+    init_db() used to run at module scope, so if Postgres was not reachable the
+    container died during gunicorn's import and CrashLoopBackOff'd -- the retry
+    loop inside init_db never got the chance to help on a later attempt.
+    """
+    global _db_ready
+    if not _db_ready:
+        init_db()
+        _db_ready = True
+
+
 @app.get("/api/health")
 def health():
+    # Liveness must not depend on the DB, or a brief DB blip kills every pod.
     return jsonify(status="ok")
 
 
 @app.post("/api/jobs")
 def create_job():
+    ensure_db()
     data = request.get_json(force=True)
     filename = data.get("filename", "").strip()
     if not filename or not filename.lower().endswith((".mp3", ".wav")):
@@ -95,6 +116,7 @@ def _result_ready(song_name):
 
 @app.get("/api/jobs")
 def list_jobs():
+    ensure_db()
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT id, filename, song_name, status, created_at FROM jobs ORDER BY id DESC")
         rows = cur.fetchall()
@@ -113,6 +135,7 @@ def list_jobs():
 
 @app.get("/api/jobs/<int:job_id>/download")
 def download(job_id):
+    ensure_db()
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT song_name, status FROM jobs WHERE id = %s", (job_id,))
         row = cur.fetchone()
@@ -129,8 +152,6 @@ def download(job_id):
     )
     return jsonify(download_url=url)
 
-
-init_db()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)

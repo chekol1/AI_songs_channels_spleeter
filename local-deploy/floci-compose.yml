@@ -1,0 +1,26 @@
+# Floci: the local AWS emulator this deployment targets.
+# Self-contained -- does not depend on any other stack on the machine.
+services:
+  floci:
+    image: ${FLOCI_IMAGE:-floci/floci:latest}
+    container_name: sonicloud-floci
+    ports:
+      - "${FLOCI_PORT:-4566}:4566"
+    environment:
+      # Deliberately NO FLOCI_STORAGE_MODE: the image ships no default for it
+      # and refuses to boot on an unknown value.
+      DEBUG: "0"
+    volumes:
+      # Floci backs EKS/RDS/ECR with REAL containers, so it needs the socket.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - floci-data:/app/data
+    restart: unless-stopped
+    networks: [sonicloud-net]
+
+volumes:
+  floci-data:
+
+networks:
+  sonicloud-net:
+    name: sonicloud-net
+    driver: bridge

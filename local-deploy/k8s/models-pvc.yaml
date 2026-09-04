@@ -1,0 +1,17 @@
+# Persistent cache for Spleeter's pretrained models.
+#
+# LOCAL-DEPLOY FIX for a real bug: upstream provisions EFS but never mounts it
+# into the worker, so spleeter re-downloads its ~76MB model archive from GitHub
+# on EVERY new pod. This PVC is the local stand-in; on real AWS the same shape
+# applies -- mount the EFS at /models and set MODEL_PATH=/models.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: spleeter-models
+  namespace: sonicloud
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 2Gi

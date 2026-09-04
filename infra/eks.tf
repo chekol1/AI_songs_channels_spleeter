@@ -25,9 +25,14 @@ resource "aws_eks_cluster" "main" {
   name     = "sonicloud-eks"
   role_arn = aws_iam_role.eks_cluster_role.arn
 
-  access_config {
-    authentication_mode = "API_AND_CONFIG_MAP" # enables Access Entries (needed for CI role)
-  }
+  # LOCAL-DEPLOY: access_config removed.
+  # Floci does not persist authentication_mode, so terraform sees permanent
+  # drift and every re-apply attempts UpdateClusterConfig -- an API Floci does
+  # not route (the request falls through to its S3 handler and the provider
+  # fails with: invalid character '<' looking for beginning of value).
+  # That made re-running the installer impossible. The setting only matters for
+  # EKS Access Entries, whose resources are also absent on this branch.
+  # See the eks-showcase branch for the real-AWS version.
 
   vpc_config {
     subnet_ids              = [aws_subnet.public_a.id, aws_subnet.public_b.id]

@@ -1,0 +1,71 @@
+# App tier. ${...} placeholders are filled by deploy.sh at apply time -- the
+# addresses differ per machine and per rebuild, so nothing here is hardcoded.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: sonicloud
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: api }
+  template:
+    metadata:
+      labels: { app: api }
+    spec:
+      containers:
+        - name: api
+          image: ${ECR_HOST}/sonicloud-api:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5000
+          env:
+            - name: AWS_REGION
+              value: ${AWS_REGION_LOCAL}
+            # Real AWS supplies credentials via the node IAM role / IMDS.
+            # Floci has neither, so they are injected explicitly.
+            #
+            # This MUST be an address the USER'S BROWSER can reach: web/src/App.jsx
+            # PUTs the song straight to the presigned URL this API signs, so the
+            # signature is computed over this host. A container-internal IP would
+            # produce a URL the browser cannot resolve.
+            - name: AWS_ENDPOINT_URL
+              value: http://${HOST_IP}:${FLOCI_PORT}
+            - name: AWS_ACCESS_KEY_ID
+              value: test
+            - name: AWS_SECRET_ACCESS_KEY
+              value: test
+            - name: UPLOAD_BUCKET
+              value: ${UPLOAD_BUCKET}
+            - name: RESULTS_BUCKET
+              value: ${RESULTS_BUCKET}
+            - name: DB_HOST
+              valueFrom: { secretKeyRef: { name: sonicloud-secrets, key: db_host } }
+            # Floci proxies RDS on a non-standard port.
+            - name: DB_PORT
+              valueFrom: { secretKeyRef: { name: sonicloud-secrets, key: db_port } }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: sonicloud-secrets, key: db_password } }
+          readinessProbe:
+            httpGet: { path: /api/health, port: 5000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /api/health, port: 5000 }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-service      # nginx proxies to this name
+  namespace: sonicloud
+spec:
+  type: ClusterIP
+  selector: { app: api }
+  ports:
+    - port: 5000
+      targetPort: 5000

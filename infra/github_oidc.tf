@@ -72,38 +72,22 @@ resource "aws_iam_role_policy" "github_actions_permissions" {
 }
 
 # Kubernetes-side access: let the CI role run kubectl (rollout restart)
-resource "aws_eks_access_entry" "github_actions" {
-  cluster_name  = aws_eks_cluster.main.name
-  principal_arn = aws_iam_role.github_actions.arn
-}
 
-resource "aws_eks_access_policy_association" "github_actions_admin" {
-  cluster_name  = aws_eks_cluster.main.name
-  principal_arn = aws_iam_role.github_actions.arn
-  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-
-  access_scope {
-    type       = "namespace"
-    namespaces = ["sonicloud"]
-  }
-}
 
 # Cluster admin access for the human operator (the terraform/CLI user)
-resource "aws_eks_access_entry" "admin_user" {
-  cluster_name  = aws_eks_cluster.main.name
-  principal_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/sonicloud-admin"
-}
 
-resource "aws_eks_access_policy_association" "admin_user" {
-  cluster_name  = aws_eks_cluster.main.name
-  principal_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/sonicloud-admin"
-  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-
-  access_scope {
-    type = "cluster"
-  }
-}
 
 output "github_actions_role_arn" {
   value = aws_iam_role.github_actions.arn
 }
+
+# ---------------------------------------------------------------------------
+# REMOVED FOR THE LOCAL DEPLOYMENT
+# aws_eks_access_entry x2 and aws_eks_access_policy_association x2 lived here.
+# Floci does not route the EKS access-entry APIs at all -- CreateAccessEntry and
+# AssociateAccessPolicy fall through to its S3 handler and return:
+#   InvalidArgument: POST requires either ?uploads, ?uploadId, ?restore or
+#   ?select parameter
+# They are only meaningful against a real EKS control plane, so they are absent
+# on this branch. See the eks-showcase branch for the real-AWS version.
+# ---------------------------------------------------------------------------

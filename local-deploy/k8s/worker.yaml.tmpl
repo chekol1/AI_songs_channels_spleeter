@@ -1,0 +1,45 @@
+# Background processor: polls SQS, runs spleeter, uploads stems. No Service.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: sonicloud
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: worker }
+  template:
+    metadata:
+      labels: { app: worker }
+    spec:
+      containers:
+        - name: worker
+          image: ${ECR_HOST}/sonicloud-worker:latest
+          imagePullPolicy: Always
+          env:
+            - name: AWS_REGION
+              value: ${AWS_REGION_LOCAL}
+            - name: AWS_ENDPOINT_URL
+              value: http://${FLOCI_IP}:${FLOCI_PORT}
+            - name: AWS_ACCESS_KEY_ID
+              value: test
+            - name: AWS_SECRET_ACCESS_KEY
+              value: test
+            - name: QUEUE_URL
+              value: ${QUEUE_URL}
+            - name: RESULT_BUCKET
+              value: ${RESULTS_BUCKET}
+            # spleeter reads: environ.get("MODEL_PATH", "pretrained_models")
+            # Pointing it at the PVC is what stops the per-pod re-download.
+            - name: MODEL_PATH
+              value: /models
+          volumeMounts:
+            - name: models
+              mountPath: /models
+          resources:
+            requests: { cpu: 500m, memory: 2Gi }
+            limits:   { cpu: "2",  memory: 6Gi }   # TensorFlow was OOMKilled at 3Gi
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: spleeter-models
