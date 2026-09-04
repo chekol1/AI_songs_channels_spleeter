@@ -8,10 +8,55 @@ const styles = {
   th: { textAlign: 'left', borderBottom: '2px solid #eee', padding: 8 },
   td: { borderBottom: '1px solid #f0f0f0', padding: 8 },
   badge: (s) => ({
-    padding: '2px 10px', borderRadius: 999, fontSize: 13,
-    background: s === 'done' ? '#dcfce7' : '#fef9c3',
-    color: s === 'done' ? '#166534' : '#854d0e',
+    padding: '2px 10px', borderRadius: 999, fontSize: 13, whiteSpace: 'nowrap',
+    background: s === 'done' ? '#dcfce7' : s === 'failed' ? '#fee2e2' : '#fef9c3',
+    color: s === 'done' ? '#166534' : s === 'failed' ? '#991b1b' : '#854d0e',
   }),
+  barOuter: { height: 6, background: '#eee', borderRadius: 999, overflow: 'hidden', marginTop: 6 },
+  barInner: (pct, s) => ({
+    height: '100%', width: `${pct}%`,
+    background: s === 'done' ? '#16a34a' : s === 'failed' ? '#dc2626' : '#4f46e5',
+    transition: 'width .6s ease',
+  }),
+  steps: { display: 'flex', gap: 4, marginTop: 6 },
+  step: (state) => ({
+    flex: 1, height: 4, borderRadius: 2,
+    background: state === 'done' ? '#4f46e5' : state === 'active' ? '#a5b4fc' : '#e5e7eb',
+  }),
+  detail: { fontSize: 12, color: '#666', marginTop: 4 },
+}
+
+// The pipeline the worker walks through, in order.
+const STAGES = ['queued', 'downloading', 'separating', 'packaging', 'uploading', 'done']
+
+function StageBar({ job }) {
+  const pct = job.percent ?? (job.status === 'done' ? 100 : 5)
+  const idx = STAGES.indexOf(job.stage || (job.status === 'done' ? 'done' : 'queued'))
+  const failed = job.stage === 'failed'
+  return (
+    <div>
+      <span style={styles.badge(failed ? 'failed' : job.status)}>
+        {job.stage_label || job.status}
+      </span>
+      <div style={styles.barOuter}>
+        <div style={styles.barInner(failed ? 100 : pct, failed ? 'failed' : job.status)} />
+      </div>
+      {!failed && (
+        <div style={styles.steps}>
+          {STAGES.slice(1).map((s, i) => (
+            <div key={s} title={s}
+                 style={styles.step(idx > i + 1 ? 'done' : idx === i + 1 ? 'active' : 'todo')} />
+          ))}
+        </div>
+      )}
+      {(job.stage_detail || job.elapsed_seconds != null) && (
+        <div style={styles.detail}>
+          {job.stage_detail}
+          {job.elapsed_seconds != null && ` · ${Math.round(job.elapsed_seconds)}s elapsed`}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function App() {
@@ -27,11 +72,14 @@ export default function App() {
     } catch { /* ignore transient errors */ }
   }
 
+  // 10s is far too slow to watch a job move through stages, but polling that
+  // fast forever is wasteful -- so speed up only while something is running.
+  const active = jobs.some(j => j.status !== 'done' && j.stage !== 'failed')
   useEffect(() => {
     refresh()
-    const t = setInterval(refresh, 10000)
+    const t = setInterval(refresh, active ? 2000 : 10000)
     return () => clearInterval(t)
-  }, [])
+  }, [active])
 
   const upload = async () => {
     const file = fileRef.current.files[0]
@@ -53,7 +101,7 @@ export default function App() {
         body: file,
       })
       if (!put.ok) throw new Error('S3 upload failed')
-      setMsg('Uploaded! The AI worker is splitting your song - status updates below.')
+      setMsg('Uploaded. Progress for each stage is shown below.')
       fileRef.current.value = ''
       refresh()
     } catch (e) {
@@ -102,7 +150,7 @@ export default function App() {
               <tr key={j.id}>
                 <td style={styles.td}>{j.id}</td>
                 <td style={styles.td}>{j.filename}</td>
-                <td style={styles.td}><span style={styles.badge(j.status)}>{j.status}</span></td>
+                <td style={{ ...styles.td, minWidth: 230 }}><StageBar job={j} /></td>
                 <td style={styles.td}>{new Date(j.created_at).toLocaleString()}</td>
                 <td style={styles.td}>
                   {j.status === 'done' && (
