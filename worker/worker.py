@@ -44,7 +44,31 @@ STAGES = {
 }
 
 
-def set_stage(song_name, stage, detail=None, started_at=None):
+def parse_key(key):
+    """tenants/<tenant_id>/uploads/<stems>/<filename> -> (tenant_id, stems, filename).
+
+    The tenant and stem count travel in the key because an S3 event carries the
+    object key and nothing else -- no metadata, no user context. Encoding them
+    in the path keeps the worker stateless and needs no extra API call.
+
+    Anything that does not match is treated as a legacy single-tenant upload so
+    old objects still process rather than crashing the loop.
+    """
+    parts = key.split("/")
+    if len(parts) == 5 and parts[0] == "tenants" and parts[2] == "uploads":
+        tenant_id, stems, filename = parts[1], parts[3], parts[4]
+        try:
+            return tenant_id, int(stems), filename
+        except ValueError:
+            pass
+    return None, 2, os.path.basename(key)
+
+
+def result_prefix(tenant_id):
+    return f"tenants/{tenant_id}" if tenant_id else "."
+
+
+def set_stage(tenant_id, song_name, stage, detail=None, started_at=None):
     percent, label = STAGES.get(stage, (0, stage))
     body = {
         "song_name": song_name,
@@ -59,7 +83,7 @@ def set_stage(song_name, stage, detail=None, started_at=None):
     try:
         s3.put_object(
             Bucket=RESULT_BUCKET,
-            Key=f"status/{song_name}.json",
+            Key=f"{result_prefix(tenant_id)}/status/{song_name}.json",
             Body=json.dumps(body).encode(),
             ContentType="application/json",
         )
@@ -69,36 +93,40 @@ def set_stage(song_name, stage, detail=None, started_at=None):
 
 
 def process_song(input_bucket, key):
-    song_name = os.path.splitext(key)[0]
-    download_path = f"/tmp/{key}"
+    tenant_id, stems, filename = parse_key(key)
+    song_name = os.path.splitext(filename)[0]
+    download_path = f"/tmp/{filename}"
     output_base = "/tmp/output"
     zip_path = f"/tmp/{song_name}_stems"  # shutil adds .zip automatically
 
     t0 = time.time()
     try:
-        set_stage(song_name, "downloading", f"{key} from {input_bucket}", t0)
+        set_stage(tenant_id, song_name, "downloading", f"{filename} from {input_bucket}", t0)
         s3.download_file(input_bucket, key, download_path)
 
         size_mb = round(os.path.getsize(download_path) / 1048576, 1)
-        set_stage(song_name, "separating", f"{size_mb} MB - this is the slow step", t0)
+        set_stage(tenant_id, song_name, "separating",
+                  f"{size_mb} MB into {stems} stems - this is the slow step", t0)
         subprocess.run(
-            ["spleeter", "separate", "-p", "spleeter:2stems", "-o", output_base, download_path],
+            ["spleeter", "separate", "-p", f"spleeter:{stems}stems",
+             "-o", output_base, download_path],
             check=True,
         )
 
         stem_folder = os.path.join(output_base, song_name)
-        set_stage(song_name, "packaging", "vocals + accompaniment", t0)
+        set_stage(tenant_id, song_name, "packaging", f"{stems} stems", t0)
         shutil.make_archive(zip_path, "zip", stem_folder)
 
         final_zip = f"{zip_path}.zip"
         zip_mb = round(os.path.getsize(final_zip) / 1048576, 1)
-        set_stage(song_name, "uploading", f"{zip_mb} MB to {RESULT_BUCKET}", t0)
-        s3.upload_file(final_zip, RESULT_BUCKET, f"finished/{song_name}.zip")
+        set_stage(tenant_id, song_name, "uploading", f"{zip_mb} MB to {RESULT_BUCKET}", t0)
+        s3.upload_file(final_zip, RESULT_BUCKET,
+                       f"{result_prefix(tenant_id)}/finished/{song_name}.zip")
 
-        set_stage(song_name, "done", f"took {round(time.time() - t0)}s", t0)
+        set_stage(tenant_id, song_name, "done", f"{stems} stems in {round(time.time() - t0)}s", t0)
 
     except Exception as e:
-        set_stage(song_name, "failed", str(e)[:200], t0)
+        set_stage(tenant_id, song_name, "failed", str(e)[:200], t0)
         print(f"Error during processing: {e}")
         raise  # let SQS retry / DLQ handle it
 
