@@ -11,13 +11,27 @@ import time
 import jwt
 from jwt import PyJWKClient
 
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 COGNITO_ENDPOINT = os.environ.get("AWS_ENDPOINT_URL", "").rstrip("/")
 USER_POOL_ID = os.environ["COGNITO_USER_POOL_ID"]
 CLIENT_ID = os.environ["COGNITO_CLIENT_ID"]
 
-# On real AWS the issuer is https://cognito-idp.<region>.amazonaws.com/<pool>.
-# Against the emulator it is <endpoint>/<pool>. Configurable for that reason.
-ISSUER = os.environ.get("COGNITO_ISSUER") or f"{COGNITO_ENDPOINT}/{USER_POOL_ID}"
+
+def _default_issuer():
+    """Real AWS unless an endpoint override says otherwise.
+
+    Previously this was `f"{COGNITO_ENDPOINT}/{USER_POOL_ID}"` unconditionally.
+    On real AWS, AWS_ENDPOINT_URL is unset, so that produced the RELATIVE path
+    "/us-east-1_xxx" and the JWKS fetch could never succeed -- every
+    authenticated request would 401. Real AWS is the default here, and an
+    endpoint override is what selects the emulator.
+    """
+    if COGNITO_ENDPOINT:
+        return f"{COGNITO_ENDPOINT}/{USER_POOL_ID}"
+    return f"https://cognito-idp.{AWS_REGION}.amazonaws.com/{USER_POOL_ID}"
+
+
+ISSUER = os.environ.get("COGNITO_ISSUER") or _default_issuer()
 JWKS_URL = os.environ.get("COGNITO_JWKS_URL") or f"{ISSUER}/.well-known/jwks.json"
 
 _jwk_client = None

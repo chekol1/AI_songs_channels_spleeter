@@ -94,6 +94,20 @@ resource "aws_iam_role_policy" "node_s3_access" {
         Effect   = "Allow"
         Action   = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"]
         Resource = [aws_sqs_queue.music_jobs_queue.arn]
+      },
+      {
+        # The api confirms new signups itself (there is no email step), which is
+        # an ADMIN Cognito call and therefore needs IAM. Without this, signup
+        # fails with AccessDenied on real AWS. SignUp and InitiateAuth are
+        # unauthenticated APIs, but granting them removes any ambiguity.
+        Effect = "Allow"
+        Action = [
+          "cognito-idp:AdminConfirmSignUp",
+          "cognito-idp:AdminGetUser",
+          "cognito-idp:SignUp",
+          "cognito-idp:InitiateAuth",
+        ]
+        Resource = [aws_cognito_user_pool.tenants.arn]
       }
     ]
   })
