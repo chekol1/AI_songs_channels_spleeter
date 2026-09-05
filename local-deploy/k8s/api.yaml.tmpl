@@ -39,6 +39,12 @@ spec:
               value: ${UPLOAD_BUCKET}
             - name: RESULTS_BUCKET
               value: ${RESULTS_BUCKET}
+            # Tenant identity. The API verifies token signatures against this
+            # pool's JWKS, so these must match the pool terraform created.
+            - name: COGNITO_USER_POOL_ID
+              value: ${COGNITO_USER_POOL_ID}
+            - name: COGNITO_CLIENT_ID
+              value: ${COGNITO_CLIENT_ID}
             - name: DB_HOST
               valueFrom: { secretKeyRef: { name: sonicloud-secrets, key: db_host } }
             # Floci proxies RDS on a non-standard port.

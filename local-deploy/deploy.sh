@@ -68,6 +68,8 @@ terraform apply -auto-approve -input=false >/dev/null 2>&1 || {
   c_err "terraform apply failed; rerunning to show the error"; terraform apply -auto-approve -input=false; exit 1; }
 c_ok "$(terraform state list | wc -l) resources"
 DB_PASSWORD="$(terraform output -raw db_password)"
+COGNITO_USER_POOL_ID="$(terraform output -raw cognito_user_pool_id)"
+COGNITO_CLIENT_ID="$(terraform output -raw cognito_client_id)"
 QUEUE_URL="$(terraform output -raw sqs_url)"
 cd "$REPO_ROOT"
 
@@ -76,6 +78,7 @@ DB_HOST="$(aws_local rds describe-db-instances --db-instance-identifier soniclou
 DB_PORT="$(aws_local rds describe-db-instances --db-instance-identifier sonicloud-db \
             --query 'DBInstances[0].Endpoint.Port' --output text)"
 c_ok "rds at $DB_HOST:$DB_PORT"
+c_ok "cognito pool $COGNITO_USER_POOL_ID"
 # The worker talks to floci container-to-container; the QUEUE_URL terraform
 # emits points at localhost, which is meaningless inside a pod.
 QUEUE_URL="${QUEUE_URL/localhost/$FLOCI_IP}"
@@ -152,7 +155,8 @@ c_ok "cluster ready ($(kc get nodes --no-headers | wc -l) node)"
 # -------------------------------------------------------------------- 7. deploy
 step "7/9  deploying workloads"
 export ECR_HOST AWS_REGION_LOCAL HOST_IP FLOCI_PORT FLOCI_IP \
-       UPLOAD_BUCKET RESULTS_BUCKET QUEUE_URL NAMESPACE
+       UPLOAD_BUCKET RESULTS_BUCKET QUEUE_URL NAMESPACE \
+       COGNITO_USER_POOL_ID COGNITO_CLIENT_ID
 render_dir="$(mktemp -d)"
 cp "$LOCAL_DIR/k8s/namespace.yaml" "$LOCAL_DIR/k8s/models-pvc.yaml" "$render_dir/"
 for t in api web worker; do

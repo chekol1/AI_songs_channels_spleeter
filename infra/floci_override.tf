@@ -30,6 +30,7 @@ provider "aws" {
     eks = "http://localhost:4566"  # cluster + node group
     rds = "http://localhost:4566"  # db subnet group + postgres instance
     efs = "http://localhost:4566"  # file system + mount target
+    cognitoidp = "http://localhost:4566"  # user pool + client (tenant identity)
   }
 }
 
