@@ -76,6 +76,10 @@ def init_db(retries=10, delay=5):
                 cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tenant_id INTEGER")
                 cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS stems INTEGER NOT NULL DEFAULT 2")
                 cur.execute("CREATE INDEX IF NOT EXISTS jobs_tenant_idx ON jobs (tenant_id)")
+                # Additive migration: the tenants table predates billing, and
+                # CREATE TABLE IF NOT EXISTS is a no-op on an existing table.
+                cur.execute("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'free'")
+                cur.execute("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS credits INTEGER NOT NULL DEFAULT 3")
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS mock_payments (
                         id SERIAL PRIMARY KEY,
