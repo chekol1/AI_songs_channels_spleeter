@@ -10,8 +10,13 @@
 resource "aws_cognito_user_pool" "tenants" {
   name = "sonicloud-tenants"
 
-  username_attributes      = ["email"]
-  auto_verified_attributes = ["email"]
+  username_attributes = ["email"]
+
+  # Deliberately NOT auto_verified_attributes = ["email"]: the api confirms new
+  # users itself via AdminConfirmSignUp, so Cognito would send a verification
+  # email that nothing ever uses. On real AWS that is wasted mail against the
+  # default sender's 50/day cap. Add SES and re-enable this if you want a real
+  # email confirmation flow instead.
 
   password_policy {
     minimum_length    = 8

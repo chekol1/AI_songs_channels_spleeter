@@ -84,7 +84,9 @@ kubectl apply -f k8s/namespace.yaml
 kubectl create secret generic sonicloud-secrets \
   --namespace sonicloud \
   --from-literal=db_host="$DB_HOST" \
-  --from-literal=db_password="$DB_PASS"
+  --from-literal=db_password="$DB_PASS" \
+  --from-literal=cognito_user_pool_id="$(terraform -chdir=infra output -raw cognito_user_pool_id)" \
+  --from-literal=cognito_client_id="$(terraform -chdir=infra output -raw cognito_client_id)"
 ```
 
 ## שלב 5 — פריסת האפליקציה
