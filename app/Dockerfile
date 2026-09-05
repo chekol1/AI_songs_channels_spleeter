@@ -1,5 +1,5 @@
 # Step 1: Use a lightweight Python base
-FROM python:3.9-slim
+FROM python:3.14-slim
 
 # Step 2: Install system dependencies (FFmpeg is mandatory for audio)
 RUN apt-get update && apt-get install -y \
