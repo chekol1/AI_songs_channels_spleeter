@@ -153,7 +153,7 @@ function Auth({ onToken }) {
       </div>
 
       <div className="banner">
-        <b>Test environment.</b> Accounts here are for testing. Don't reuse a real password.
+        <b>Test environment.</b> Accounts and payments here are simulated. Don't reuse a real password.
       </div>
     </div>
   )
@@ -162,6 +162,7 @@ function Auth({ onToken }) {
 export default function App() {
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '')
   const [me, setMe] = useState(null)
+  const [plans, setPlans] = useState({})
   const [jobs, setJobs] = useState([])
   const [stems, setStems] = useState(2)
   const [file, setFile] = useState(null)
@@ -186,6 +187,7 @@ export default function App() {
     } catch { /* transient */ }
   }
 
+  useEffect(() => { fetch('/api/config').then(r => r.json()).then(c => setPlans(c.plans || {})).catch(() => {}) }, [])
   useEffect(() => { if (token) { loadMe(); refresh() } }, [token])
 
   const active = jobs.some(j => j.status !== 'done' && j.stage !== 'failed')
@@ -216,10 +218,23 @@ export default function App() {
         method: 'PUT', headers: { 'Content-Type': 'audio/mpeg' }, body: file,
       })
       if (!put.ok) throw new Error('upload failed')
-      setMsg(`Queued — separating into ${body.stems} stems.`)
+      setMsg(`Queued. ${body.credits_left} credit${body.credits_left === 1 ? '' : 's'} left.`)
       setFile(null); if (fileRef.current) fileRef.current.value = ''
       refresh(); loadMe()
     } catch (e) { setMsg(e.message) } finally { setBusy(false) }
+  }
+
+  const buy = async (plan) => {
+    setBusy(true)
+    try {
+      const r = await fetch('/api/billing/checkout', {
+        method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan }),
+      })
+      const b = await r.json()
+      setMsg(r.ok ? `Simulated upgrade to ${plan}. ${b.credits} credits available.` : b.error)
+      loadMe()
+    } finally { setBusy(false) }
   }
 
   const download = async (id) => {
@@ -229,7 +244,8 @@ export default function App() {
 
   if (!token) return <Auth onToken={setToken} />
 
-  const allowed = [2, 4, 5]
+  const allowed = me?.plan_detail?.stems || [2]
+  const noCredits = me && me.credits <= 0
 
   return (
     <div style={{ maxWidth: 980, margin: '0 auto', padding: '28px 20px 64px' }}>
@@ -240,6 +256,16 @@ export default function App() {
           <div style={{ ...mute, fontSize: 12 }}>
             {me?.email} · tenant <span className="mono">#{me?.tenant_id}</span>
           </div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={label}>Credits</div>
+          <div className="mono" style={{ fontSize: 26, lineHeight: 1, color: noCredits ? 'var(--danger)' : 'var(--accent)' }}>
+            {me?.credits ?? '—'}
+          </div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={label}>Plan</div>
+          <div style={{ fontSize: 17, lineHeight: 1.4 }}>{me?.plan_detail?.name || me?.plan}</div>
         </div>
         <button className="btn-ghost" onClick={signOut}>Sign out</button>
       </header>
@@ -277,9 +303,10 @@ export default function App() {
               <div key={n}
                    className={`stem-opt${stems === n ? ' sel' : ''}${ok ? '' : ' locked'}`}
                    onClick={() => ok && setStems(n)}
->
+                   title={ok ? '' : 'Included with Pro'}>
                 <div style={{ ...row(8), marginBottom: 8 }}>
                   <span style={{ fontSize: 16, fontWeight: 650 }}>{n} stems</span>
+                  {!ok && <span style={{ ...mute, fontSize: 11 }}>PRO</span>}
                 </div>
                 <StemChips n={n} />
               </div>
@@ -288,9 +315,10 @@ export default function App() {
         </div>
 
         <div style={{ ...row(), marginTop: 20 }}>
-          <button className="btn" onClick={upload} disabled={busy || !file}>
+          <button className="btn" onClick={upload} disabled={busy || noCredits || !file}>
             {busy ? 'Working…' : 'Split track'}
           </button>
+          {noCredits && <span style={{ color: 'var(--danger)', fontSize: 14 }}>Out of credits — see plans below.</span>}
           {msg && <span style={{ ...dim, fontSize: 14 }}>{msg}</span>}
         </div>
       </div>
@@ -331,6 +359,38 @@ export default function App() {
         )}
       </div>
 
+      <div className="panel">
+        <div style={{ ...row(), marginBottom: 4 }}>
+          <h2 style={{ fontSize: 17, margin: 0, flex: 1 }}>Plans</h2>
+          <span style={{ color: 'var(--warn)', fontSize: 12 }}>simulated — no payment is taken</span>
+        </div>
+        <p style={{ ...mute, fontSize: 13, margin: '0 0 16px' }}>One credit per separation.</p>
+        <div className="plans">
+          {Object.entries(plans).map(([key, p]) => (
+            <div key={key} className={`plan${me?.plan === key ? ' current' : ''}`}>
+              <div style={{ ...row(8) }}>
+                <span style={{ fontSize: 17, fontWeight: 650, flex: 1 }}>{p.name}</span>
+                {me?.plan === key && <span className="pill done">current</span>}
+              </div>
+              <div className="mono" style={{ fontSize: 30, margin: '10px 0 2px' }}>
+                ${p.price_usd}
+              </div>
+              <div style={{ ...mute, fontSize: 12, marginBottom: 12 }}>
+                {p.credits} credits · {p.stems.join(', ')} stems
+              </div>
+              <div style={{ ...dim, fontSize: 13, minHeight: 44 }}>{p.blurb}</div>
+              <button className="btn" style={{ width: '100%', marginTop: 12 }}
+                      disabled={busy} onClick={() => buy(key)}>
+                {me?.plan === key ? 'Add credits' : 'Choose'}
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="banner">
+        <b>TEST MODE.</b> Payments are simulated — no card is collected and no money moves.
+      </div>
     </div>
   )
 }
