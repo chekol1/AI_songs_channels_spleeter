@@ -1,66 +1,93 @@
 import React, { useEffect, useRef, useState } from 'react'
+import './styles.css'
 
-const C = { indigo: '#4f46e5', green: '#16a34a', red: '#dc2626', amber: '#b45309', line: '#e5e7eb', mute: '#666' }
+const TOKEN_KEY = 'sonicloud.idToken'
+const STAGES = ['queued', 'downloading', 'separating', 'packaging', 'uploading', 'done']
 
-const styles = {
-  page: { fontFamily: 'system-ui, sans-serif', maxWidth: 860, margin: '32px auto', padding: '0 16px' },
-  card: { border: '1px solid #ddd', borderRadius: 12, padding: 20, marginBottom: 20, boxShadow: '0 1px 4px rgba(0,0,0,.06)' },
-  btn: { background: C.indigo, color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', cursor: 'pointer', fontSize: 15 },
-  btnGhost: { background: '#fff', color: C.indigo, border: `1px solid ${C.indigo}`, borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 14 },
-  input: { padding: '9px 10px', borderRadius: 8, border: '1px solid #ccc', fontSize: 15, width: '100%', boxSizing: 'border-box' },
-  table: { width: '100%', borderCollapse: 'collapse' },
-  th: { textAlign: 'left', borderBottom: `2px solid ${C.line}`, padding: 8, fontSize: 13, color: C.mute },
-  td: { borderBottom: '1px solid #f0f0f0', padding: 8, verticalAlign: 'top' },
-  badge: (s) => ({
-    padding: '2px 10px', borderRadius: 999, fontSize: 13, whiteSpace: 'nowrap',
-    background: s === 'done' ? '#dcfce7' : s === 'failed' ? '#fee2e2' : '#fef9c3',
-    color: s === 'done' ? '#166534' : s === 'failed' ? '#991b1b' : '#854d0e',
-  }),
-  barOuter: { height: 6, background: '#eee', borderRadius: 999, overflow: 'hidden', marginTop: 6 },
-  barInner: (pct, s) => ({
-    height: '100%', width: `${pct}%`,
-    background: s === 'done' ? C.green : s === 'failed' ? C.red : C.indigo,
-    transition: 'width .6s ease',
-  }),
-  steps: { display: 'flex', gap: 4, marginTop: 6 },
-  step: (st) => ({ flex: 1, height: 4, borderRadius: 2, background: st === 'done' ? C.indigo : st === 'active' ? '#a5b4fc' : C.line }),
-  detail: { fontSize: 12, color: C.mute, marginTop: 4 },
-  testBanner: {
-    background: '#fffbeb', border: '1px solid #fcd34d', color: C.amber,
-    borderRadius: 8, padding: '8px 12px', fontSize: 13, marginBottom: 16,
-  },
-  planGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(190px,1fr))', gap: 12 },
-  plan: (cur) => ({
-    border: `2px solid ${cur ? C.indigo : C.line}`, borderRadius: 10, padding: 14,
-    background: cur ? '#eef2ff' : '#fff',
-  }),
-  row: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' },
-  err: { color: C.red, fontSize: 14 },
+// Stem colours follow DAW convention, so a producer reads them without a legend.
+const STEM_SETS = {
+  2: [['Vocals', 'var(--vocals)'], ['Accompaniment', 'var(--other)']],
+  4: [['Vocals', 'var(--vocals)'], ['Drums', 'var(--drums)'], ['Bass', 'var(--bass)'], ['Other', 'var(--other)']],
+  5: [['Vocals', 'var(--vocals)'], ['Drums', 'var(--drums)'], ['Bass', 'var(--bass)'], ['Piano', '#7dd3fc'], ['Other', 'var(--other)']],
 }
 
-const STAGES = ['queued', 'downloading', 'separating', 'packaging', 'uploading', 'done']
-const TOKEN_KEY = 'sonicloud.idToken'
+const row = (gap = 12) => ({ display: 'flex', alignItems: 'center', gap, flexWrap: 'wrap' })
+const dim = { color: 'var(--text-dim)' }
+const mute = { color: 'var(--text-mute)' }
+const label = { fontSize: 11, letterSpacing: '.09em', textTransform: 'uppercase', color: 'var(--text-mute)' }
+
+/* A waveform, not a spinner: this is an audio tool, and it animates only when
+   something is actually running. */
+function Wave({ live = false, bars = 34 }) {
+  const heights = React.useMemo(
+    () => Array.from({ length: bars }, (_, i) => 24 + Math.abs(Math.sin(i * 1.7)) * 22), [bars])
+  return (
+    <div className={`wave${live ? '' : ' idle'}`} aria-hidden="true">
+      {heights.map((h, i) => (
+        <i key={i} style={{ height: h, animationDelay: `${(i % 11) * 0.09}s` }} />
+      ))}
+    </div>
+  )
+}
+
+/* Progress as a level meter — the visual language of the room this tool lives in. */
+function Meter({ percent, state, segments = 22 }) {
+  const lit = Math.round((percent / 100) * segments)
+  return (
+    <div className={`meter${state === 'run' ? ' live' : ''}`}>
+      {Array.from({ length: segments }, (_, i) => {
+        const on = i < lit
+        const hot = on && i >= segments - 4 && state !== 'done'
+        return (
+          <b key={i}
+             className={state === 'fail' ? '' : on ? (hot ? 'hot' : 'on') : ''}
+             style={{
+               height: `${38 + (i % 5) * 14}%`,
+               background: state === 'fail' && on ? 'var(--danger)' : undefined,
+             }} />
+        )
+      })}
+    </div>
+  )
+}
 
 function StageBar({ job }) {
-  const pct = job.percent ?? (job.status === 'done' ? 100 : 5)
-  const idx = STAGES.indexOf(job.stage || (job.status === 'done' ? 'done' : 'queued'))
   const failed = job.stage === 'failed'
+  const finished = job.stage === 'done' || job.status === 'done'
+  const pct = failed ? 100 : (job.percent ?? (finished ? 100 : 5))
+  const state = failed ? 'fail' : finished ? 'done' : 'run'
+  const idx = STAGES.indexOf(job.stage || (finished ? 'done' : 'queued'))
   return (
-    <div>
-      <span style={styles.badge(failed ? 'failed' : job.status)}>{job.stage_label || job.status}</span>
-      <div style={styles.barOuter}><div style={styles.barInner(failed ? 100 : pct, failed ? 'failed' : job.status)} /></div>
-      {!failed && (
-        <div style={styles.steps}>
-          {STAGES.slice(1).map((s, i) => (
-            <div key={s} title={s} style={styles.step(idx > i + 1 ? 'done' : idx === i + 1 ? 'active' : 'todo')} />
-          ))}
-        </div>
+    <div style={{ minWidth: 250 }}>
+      <div style={{ ...row(8), marginBottom: 7 }}>
+        <span className={`pill ${failed ? 'fail' : finished ? 'done' : 'run'}`}>
+          {job.stage_label || job.status}
+        </span>
+        {!finished && !failed && (
+          <span className="mono" style={{ ...mute, fontSize: 12 }}>
+            {idx < 0 ? 0 : Math.max(0, idx)}/{STAGES.length - 1}
+          </span>
+        )}
+        {job.elapsed_seconds != null && (
+          <span className="mono" style={{ ...mute, fontSize: 12 }}>
+            {Math.round(job.elapsed_seconds)}s
+          </span>
+        )}
+      </div>
+      <Meter percent={pct} state={state} />
+      {job.stage_detail && (
+        <div style={{ ...mute, fontSize: 12, marginTop: 7 }}>{job.stage_detail}</div>
       )}
-      {(job.stage_detail || job.elapsed_seconds != null) && (
-        <div style={styles.detail}>
-          {job.stage_detail}{job.elapsed_seconds != null && ` · ${Math.round(job.elapsed_seconds)}s`}
-        </div>
-      )}
+    </div>
+  )
+}
+
+function StemChips({ n }) {
+  return (
+    <div style={row(6)}>
+      {(STEM_SETS[n] || []).map(([name, colour]) => (
+        <span className="stemchip" key={name}><s style={{ background: colour }} />{name}</span>
+      ))}
     </div>
   )
 }
@@ -94,27 +121,39 @@ function Auth({ onToken }) {
   }
 
   return (
-    <div style={styles.page}>
-      <h1>🎵 SoniCloud</h1>
-      <div style={styles.testBanner}>
-        <b>Test environment.</b> Accounts and payments here are simulated. Do not use a real password.
+    <div style={{ maxWidth: 460, margin: '0 auto', padding: '72px 20px' }}>
+      <div style={{ textAlign: 'center', marginBottom: 26 }}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 18 }}><Wave live bars={40} /></div>
+        <h1 style={{ fontSize: 36, margin: '0 0 8px', letterSpacing: '-.02em' }}>SoniCloud</h1>
+        <p style={{ ...dim, margin: 0, fontSize: 15 }}>
+          Split any track into its stems. Vocals, drums, bass — isolated in about a minute.
+        </p>
       </div>
-      <div style={styles.card}>
-        <h3>{mode === 'login' ? 'Sign in' : 'Create an account'}</h3>
-        <div style={{ display: 'grid', gap: 10, maxWidth: 360 }}>
-          <input style={styles.input} placeholder="email" value={email} onChange={e => setEmail(e.target.value)} />
-          <input style={styles.input} placeholder="password (min 8 chars, 1 number)" type="password"
-                 value={password} onChange={e => setPassword(e.target.value)} />
-          {err && <div style={styles.err}>{err}</div>}
-          <div style={styles.row}>
-            <button style={styles.btn} onClick={submit} disabled={busy}>
-              {busy ? 'Working…' : mode === 'login' ? 'Sign in' : 'Sign up'}
-            </button>
-            <button style={styles.btnGhost} onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setErr('') }}>
-              {mode === 'login' ? 'Need an account?' : 'Have an account?'}
-            </button>
-          </div>
+
+      <div className="panel">
+        <div style={{ ...row(), marginBottom: 16 }}>
+          <h2 style={{ fontSize: 19, margin: 0, flex: 1 }}>
+            {mode === 'login' ? 'Sign in' : 'Create an account'}
+          </h2>
+          <button className="btn-ghost" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setErr('') }}>
+            {mode === 'login' ? 'Sign up' : 'Sign in'}
+          </button>
         </div>
+        <div style={{ display: 'grid', gap: 11 }}>
+          <input className="field" placeholder="you@studio.com" value={email}
+                 onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} />
+          <input className="field" placeholder="password — 8+ characters, one number" type="password"
+                 value={password} onChange={e => setPassword(e.target.value)}
+                 onKeyDown={e => e.key === 'Enter' && submit()} />
+          {err && <div style={{ color: 'var(--danger)', fontSize: 14 }}>{err}</div>}
+          <button className="btn" onClick={submit} disabled={busy}>
+            {busy ? 'Working…' : mode === 'login' ? 'Sign in' : 'Create account'}
+          </button>
+        </div>
+      </div>
+
+      <div className="banner">
+        <b>Test environment.</b> Accounts and payments here are simulated. Don't reuse a real password.
       </div>
     </div>
   )
@@ -126,8 +165,10 @@ export default function App() {
   const [plans, setPlans] = useState({})
   const [jobs, setJobs] = useState([])
   const [stems, setStems] = useState(2)
+  const [file, setFile] = useState(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
+  const [over, setOver] = useState(false)
   const fileRef = useRef()
 
   const auth = { 'Authorization': `Bearer ${token}` }
@@ -146,7 +187,7 @@ export default function App() {
     } catch { /* transient */ }
   }
 
-  useEffect(() => { fetch('/api/config').then(r => r.json()).then(c => setPlans(c.plans || {})) }, [])
+  useEffect(() => { fetch('/api/config').then(r => r.json()).then(c => setPlans(c.plans || {})).catch(() => {}) }, [])
   useEffect(() => { if (token) { loadMe(); refresh() } }, [token])
 
   const active = jobs.some(j => j.status !== 'done' && j.stage !== 'failed')
@@ -156,9 +197,14 @@ export default function App() {
     return () => clearInterval(t)
   }, [token, active])
 
+  const pick = (f) => {
+    if (!f) return
+    if (!/\.(mp3|wav)$/i.test(f.name)) return setMsg('Only .mp3 and .wav files')
+    setFile(f); setMsg('')
+  }
+
   const upload = async () => {
-    const file = fileRef.current.files[0]
-    if (!file) return setMsg('Pick an .mp3 or .wav first')
+    if (!file) return setMsg('Choose a track first')
     setBusy(true); setMsg('Requesting upload URL…')
     try {
       const r = await fetch('/api/jobs', {
@@ -172,10 +218,10 @@ export default function App() {
         method: 'PUT', headers: { 'Content-Type': 'audio/mpeg' }, body: file,
       })
       if (!put.ok) throw new Error('upload failed')
-      setMsg(`Uploaded. ${body.credits_left} credits left.`)
-      fileRef.current.value = ''
+      setMsg(`Queued. ${body.credits_left} credit${body.credits_left === 1 ? '' : 's'} left.`)
+      setFile(null); if (fileRef.current) fileRef.current.value = ''
       refresh(); loadMe()
-    } catch (e) { setMsg(`Error: ${e.message}`) } finally { setBusy(false) }
+    } catch (e) { setMsg(e.message) } finally { setBusy(false) }
   }
 
   const buy = async (plan) => {
@@ -186,7 +232,7 @@ export default function App() {
         body: JSON.stringify({ plan }),
       })
       const b = await r.json()
-      setMsg(r.ok ? `Simulated purchase of ${plan}. You now have ${b.credits} credits.` : `Error: ${b.error}`)
+      setMsg(r.ok ? `Simulated upgrade to ${plan}. ${b.credits} credits available.` : b.error)
       loadMe()
     } finally { setBusy(false) }
   }
@@ -199,70 +245,142 @@ export default function App() {
   if (!token) return <Auth onToken={setToken} />
 
   const allowed = me?.plan_detail?.stems || [2]
+  const noCredits = me && me.credits <= 0
+
   return (
-    <div style={styles.page}>
-      <div style={styles.row}>
-        <h1 style={{ flex: 1 }}>🎵 SoniCloud</h1>
-        {me && <span style={{ color: C.mute, fontSize: 14 }}>{me.email}</span>}
-        <button style={styles.btnGhost} onClick={signOut}>Sign out</button>
-      </div>
-
-      <div style={styles.testBanner}>
-        <b>TEST MODE.</b> Payments below are simulated — no card is collected and no money moves.
-      </div>
-
-      {me && (
-        <div style={styles.card}>
-          <div style={styles.row}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, color: C.mute }}>Plan</div>
-              <div style={{ fontSize: 20 }}><b>{me.plan_detail?.name || me.plan}</b></div>
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, color: C.mute }}>Credits</div>
-              <div style={{ fontSize: 20, color: me.credits > 0 ? C.green : C.red }}><b>{me.credits}</b></div>
-            </div>
-            <div style={{ flex: 2, fontSize: 13, color: C.mute }}>
-              Tenant #{me.tenant_id} · your songs are stored under <code>tenants/{me.tenant_id}/</code>
-            </div>
+    <div style={{ maxWidth: 980, margin: '0 auto', padding: '28px 20px 64px' }}>
+      <header style={{ ...row(14), marginBottom: 22 }}>
+        <Wave live={active} bars={18} />
+        <div style={{ flex: 1 }}>
+          <h1 style={{ fontSize: 24, margin: 0, letterSpacing: '-.02em' }}>SoniCloud</h1>
+          <div style={{ ...mute, fontSize: 12 }}>
+            {me?.email} · tenant <span className="mono">#{me?.tenant_id}</span>
           </div>
         </div>
-      )}
-
-      <div style={styles.card}>
-        <h3>Upload a song</h3>
-        <div style={{ display: 'grid', gap: 10 }}>
-          <input ref={fileRef} type="file" accept=".mp3,.wav" disabled={busy} />
-          <div style={styles.row}>
-            <span style={{ fontSize: 14, color: C.mute }}>Separate into:</span>
-            {[2, 4, 5].map(n => {
-              const ok = allowed.includes(n)
-              return (
-                <label key={n} style={{ fontSize: 14, opacity: ok ? 1 : .45, cursor: ok ? 'pointer' : 'not-allowed' }}
-                       title={ok ? '' : 'Upgrade to unlock'}>
-                  <input type="radio" name="stems" disabled={!ok} checked={stems === n}
-                         onChange={() => setStems(n)} /> {n} stems{ok ? '' : ' 🔒'}
-                </label>
-              )
-            })}
+        <div style={{ textAlign: 'right' }}>
+          <div style={label}>Credits</div>
+          <div className="mono" style={{ fontSize: 26, lineHeight: 1, color: noCredits ? 'var(--danger)' : 'var(--accent)' }}>
+            {me?.credits ?? '—'}
           </div>
-          <div><button style={styles.btn} onClick={upload} disabled={busy || (me && me.credits <= 0)}>
-            {busy ? 'Working…' : 'Upload & Split'}
-          </button></div>
-          {me && me.credits <= 0 && <div style={styles.err}>No credits left — pick a plan below.</div>}
-          {msg && <p style={{ fontSize: 14 }}>{msg}</p>}
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={label}>Plan</div>
+          <div style={{ fontSize: 17, lineHeight: 1.4 }}>{me?.plan_detail?.name || me?.plan}</div>
+        </div>
+        <button className="btn-ghost" onClick={signOut}>Sign out</button>
+      </header>
+
+      <div className="panel">
+        <h2 style={{ fontSize: 17, margin: '0 0 14px' }}>New separation</h2>
+
+        <div className={`drop${over ? ' over' : ''}`}
+             onClick={() => fileRef.current?.click()}
+             onDragOver={e => { e.preventDefault(); setOver(true) }}
+             onDragLeave={() => setOver(false)}
+             onDrop={e => { e.preventDefault(); setOver(false); pick(e.dataTransfer.files[0]) }}>
+          {file ? (
+            <>
+              <div style={{ fontSize: 16, color: 'var(--text)' }}>{file.name}</div>
+              <div className="mono" style={{ ...mute, fontSize: 12, marginTop: 4 }}>
+                {(file.size / 1048576).toFixed(1)} MB · click to change
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: 15 }}>Drop a track here, or click to browse</div>
+              <div style={{ ...mute, fontSize: 12, marginTop: 4 }}>MP3 or WAV</div>
+            </>
+          )}
+        </div>
+        <input ref={fileRef} type="file" accept=".mp3,.wav" style={{ display: 'none' }}
+               onChange={e => pick(e.target.files[0])} />
+
+        <div style={{ ...label, margin: '20px 0 9px' }}>Separate into</div>
+        <div className="stems">
+          {[2, 4, 5].map(n => {
+            const ok = allowed.includes(n)
+            return (
+              <div key={n}
+                   className={`stem-opt${stems === n ? ' sel' : ''}${ok ? '' : ' locked'}`}
+                   onClick={() => ok && setStems(n)}
+                   title={ok ? '' : 'Included with Pro'}>
+                <div style={{ ...row(8), marginBottom: 8 }}>
+                  <span style={{ fontSize: 16, fontWeight: 650 }}>{n} stems</span>
+                  {!ok && <span style={{ ...mute, fontSize: 11 }}>PRO</span>}
+                </div>
+                <StemChips n={n} />
+              </div>
+            )
+          })}
+        </div>
+
+        <div style={{ ...row(), marginTop: 20 }}>
+          <button className="btn" onClick={upload} disabled={busy || noCredits || !file}>
+            {busy ? 'Working…' : 'Split track'}
+          </button>
+          {noCredits && <span style={{ color: 'var(--danger)', fontSize: 14 }}>Out of credits — see plans below.</span>}
+          {msg && <span style={{ ...dim, fontSize: 14 }}>{msg}</span>}
         </div>
       </div>
 
-      <div style={styles.card}>
-        <h3>Plans <span style={{ fontSize: 13, color: C.amber }}>(simulated)</span></h3>
-        <div style={styles.planGrid}>
+      <div className="panel">
+        <div style={{ ...row(), marginBottom: 6 }}>
+          <h2 style={{ fontSize: 17, margin: 0, flex: 1 }}>Your tracks</h2>
+          {active && <span style={{ ...mute, fontSize: 12 }}>live · refreshing every 2s</span>}
+        </div>
+        {jobs.length === 0 ? (
+          <div style={{ ...mute, padding: '26px 0', textAlign: 'center' }}>
+            Nothing here yet. Your separations will appear as they run.
+          </div>
+        ) : (
+          <table>
+            <thead><tr>
+              <th style={{ width: 42 }}>#</th><th>Track</th><th style={{ width: 78 }}>Stems</th>
+              <th style={{ width: 270 }}>Progress</th><th style={{ width: 110 }}></th>
+            </tr></thead>
+            <tbody>
+              {jobs.map(j => (
+                <tr key={j.id}>
+                  <td className="mono" style={mute}>{j.id}</td>
+                  <td>
+                    <div style={{ fontSize: 15 }}>{j.filename}</div>
+                    <div className="mono" style={{ ...mute, fontSize: 11, marginTop: 3 }}>
+                      {new Date(j.created_at).toLocaleString()}
+                    </div>
+                  </td>
+                  <td className="mono">{j.stems}</td>
+                  <td><StageBar job={j} /></td>
+                  <td>{j.status === 'done' &&
+                    <button className="btn-ghost" onClick={() => download(j.id)}>Download</button>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="panel">
+        <div style={{ ...row(), marginBottom: 4 }}>
+          <h2 style={{ fontSize: 17, margin: 0, flex: 1 }}>Plans</h2>
+          <span style={{ color: 'var(--warn)', fontSize: 12 }}>simulated — no payment is taken</span>
+        </div>
+        <p style={{ ...mute, fontSize: 13, margin: '0 0 16px' }}>One credit per separation.</p>
+        <div className="plans">
           {Object.entries(plans).map(([key, p]) => (
-            <div key={key} style={styles.plan(me?.plan === key)}>
-              <div style={{ fontSize: 17 }}><b>{p.name}</b></div>
-              <div style={{ fontSize: 22, margin: '4px 0' }}>${p.price_usd}</div>
-              <div style={{ fontSize: 13, color: C.mute, minHeight: 40 }}>{p.blurb}</div>
-              <button style={styles.btn} disabled={busy} onClick={() => buy(key)}>
+            <div key={key} className={`plan${me?.plan === key ? ' current' : ''}`}>
+              <div style={{ ...row(8) }}>
+                <span style={{ fontSize: 17, fontWeight: 650, flex: 1 }}>{p.name}</span>
+                {me?.plan === key && <span className="pill done">current</span>}
+              </div>
+              <div className="mono" style={{ fontSize: 30, margin: '10px 0 2px' }}>
+                ${p.price_usd}
+              </div>
+              <div style={{ ...mute, fontSize: 12, marginBottom: 12 }}>
+                {p.credits} credits · {p.stems.join(', ')} stems
+              </div>
+              <div style={{ ...dim, fontSize: 13, minHeight: 44 }}>{p.blurb}</div>
+              <button className="btn" style={{ width: '100%', marginTop: 12 }}
+                      disabled={busy} onClick={() => buy(key)}>
                 {me?.plan === key ? 'Add credits' : 'Choose'}
               </button>
             </div>
@@ -270,30 +388,8 @@ export default function App() {
         </div>
       </div>
 
-      <div style={styles.card}>
-        <h3>Your jobs</h3>
-        <table style={styles.table}>
-          <thead><tr>
-            <th style={styles.th}>#</th><th style={styles.th}>Song</th>
-            <th style={styles.th}>Stems</th><th style={styles.th}>Progress</th>
-            <th style={styles.th}>Created</th><th style={styles.th}></th>
-          </tr></thead>
-          <tbody>
-            {jobs.map(j => (
-              <tr key={j.id}>
-                <td style={styles.td}>{j.id}</td>
-                <td style={styles.td}>{j.filename}</td>
-                <td style={styles.td}>{j.stems}</td>
-                <td style={{ ...styles.td, minWidth: 230 }}><StageBar job={j} /></td>
-                <td style={styles.td}>{new Date(j.created_at).toLocaleString()}</td>
-                <td style={styles.td}>
-                  {j.status === 'done' && <button style={styles.btnGhost} onClick={() => download(j.id)}>Download</button>}
-                </td>
-              </tr>
-            ))}
-            {jobs.length === 0 && <tr><td style={styles.td} colSpan={6}>No jobs yet.</td></tr>}
-          </tbody>
-        </table>
+      <div className="banner">
+        <b>TEST MODE.</b> Payments are simulated — no card is collected and no money moves.
       </div>
     </div>
   )
