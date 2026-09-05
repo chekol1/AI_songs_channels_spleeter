@@ -27,6 +27,12 @@ spec:
               value: sonic-cloud-music-010686621615
             - name: RESULTS_BUCKET
               value: sonic-cloud-music-results-010686621615
+            # Tenant identity. Token signatures are verified against this
+            # pool's JWKS, so these must match the pool terraform creates.
+            - name: COGNITO_USER_POOL_ID
+              valueFrom: { secretKeyRef: { name: sonicloud-secrets, key: cognito_user_pool_id } }
+            - name: COGNITO_CLIENT_ID
+              valueFrom: { secretKeyRef: { name: sonicloud-secrets, key: cognito_client_id } }
             - name: DB_HOST
               valueFrom:
                 secretKeyRef: { name: sonicloud-secrets, key: db_host }
