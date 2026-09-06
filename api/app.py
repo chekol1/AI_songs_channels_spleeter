@@ -21,6 +21,7 @@ import psycopg2.extras
 from flask import Flask, g, jsonify, request
 
 from auth import AuthError, verify_token
+from billing import DEFAULT_PLAN, PLANS, plan_of, stems_allowed
 
 app = Flask(__name__)
 
@@ -57,6 +58,8 @@ def init_db(retries=10, delay=5):
                         id SERIAL PRIMARY KEY,
                         cognito_sub TEXT UNIQUE NOT NULL,
                         email TEXT NOT NULL,
+                        plan TEXT NOT NULL DEFAULT 'free',
+                        credits INTEGER NOT NULL DEFAULT 3,
                         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                     )
                 """)
@@ -73,6 +76,21 @@ def init_db(retries=10, delay=5):
                 cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tenant_id INTEGER")
                 cur.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS stems INTEGER NOT NULL DEFAULT 2")
                 cur.execute("CREATE INDEX IF NOT EXISTS jobs_tenant_idx ON jobs (tenant_id)")
+                # Additive migration: the tenants table predates billing, and
+                # CREATE TABLE IF NOT EXISTS is a no-op on an existing table.
+                cur.execute("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'free'")
+                cur.execute("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS credits INTEGER NOT NULL DEFAULT 3")
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS mock_payments (
+                        id SERIAL PRIMARY KEY,
+                        tenant_id INTEGER NOT NULL,
+                        plan TEXT NOT NULL,
+                        amount_usd INTEGER NOT NULL,
+                        credits_granted INTEGER NOT NULL,
+                        note TEXT NOT NULL DEFAULT 'TEST MODE - simulated, no payment taken',
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
+                """)
             print("DB ready")
             return
         except Exception as e:
@@ -106,8 +124,9 @@ def current_tenant():
         row = cur.fetchone()
         if row is None:
             cur.execute(
-                "INSERT INTO tenants (cognito_sub, email) VALUES (%s, %s) RETURNING *",
-                (sub, email),
+                "INSERT INTO tenants (cognito_sub, email, plan, credits) "
+                "VALUES (%s, %s, %s, %s) RETURNING *",
+                (sub, email, DEFAULT_PLAN, PLANS[DEFAULT_PLAN]["credits"]),
             )
             row = cur.fetchone()
     g.tenant = row
@@ -132,7 +151,11 @@ def health():
 @app.get("/api/config")
 def config():
     """Public: what the browser needs to talk to Cognito."""
-    return jsonify(user_pool_id=COGNITO_USER_POOL_ID, client_id=COGNITO_CLIENT_ID)
+    return jsonify(
+        user_pool_id=COGNITO_USER_POOL_ID,
+        client_id=COGNITO_CLIENT_ID,
+        plans=PLANS,
+    )
 
 
 @app.post("/api/auth/signup")
@@ -174,7 +197,35 @@ def login():
 def me():
     ensure_db()
     t = current_tenant()
-    return jsonify(tenant_id=t["id"], email=t["email"])
+    return jsonify(
+        tenant_id=t["id"], email=t["email"], plan=t["plan"], credits=t["credits"],
+        plan_detail=plan_of(t["plan"]),
+    )
+
+
+@app.post("/api/billing/checkout")
+def checkout():
+    """SIMULATED purchase. No card details are accepted and no money moves."""
+    ensure_db()
+    t = current_tenant()
+    plan_name = (request.get_json(force=True) or {}).get("plan")
+    if plan_name not in PLANS:
+        return jsonify(error=f"unknown plan; choose one of {list(PLANS)}"), 400
+    p = PLANS[plan_name]
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE tenants SET plan = %s, credits = credits + %s WHERE id = %s "
+            "RETURNING credits",
+            (plan_name, p["credits"], t["id"]),
+        )
+        credits = cur.fetchone()[0]
+        cur.execute(
+            "INSERT INTO mock_payments (tenant_id, plan, amount_usd, credits_granted) "
+            "VALUES (%s, %s, %s, %s)",
+            (t["id"], plan_name, p["price_usd"], p["credits"]),
+        )
+    return jsonify(ok=True, test_mode=True, plan=plan_name, credits=credits,
+                   note="TEST MODE - simulated purchase, no payment was taken")
 
 
 @app.post("/api/jobs")
@@ -189,6 +240,11 @@ def create_job():
         return jsonify(error="filename must end with .mp3 or .wav"), 400
     if stems not in (2, 4, 5):
         return jsonify(error="stems must be 2, 4 or 5"), 400
+    if not stems_allowed(t["plan"], stems):
+        return jsonify(error=f"the {t['plan']} plan does not include {stems}-stem separation",
+                       upgrade_required=True), 402
+    if t["credits"] <= 0:
+        return jsonify(error="you have no credits left", upgrade_required=True), 402
 
     song_name = os.path.splitext(filename)[0]
     key = f"{tenant_prefix(t['id'])}/uploads/{stems}/{filename}"
@@ -200,13 +256,18 @@ def create_job():
             (filename, song_name, t["id"], stems),
         )
         job_id = cur.fetchone()[0]
+        # A credit is spent on submission, so a queued job cannot be duplicated
+        # for free by re-uploading before the first finishes.
+        cur.execute("UPDATE tenants SET credits = credits - 1 WHERE id = %s RETURNING credits",
+                    (t["id"],))
+        credits = cur.fetchone()[0]
 
     upload_url = s3.generate_presigned_url(
         "put_object",
         Params={"Bucket": UPLOAD_BUCKET, "Key": key, "ContentType": "audio/mpeg"},
         ExpiresIn=900,
     )
-    return jsonify(id=job_id, upload_url=upload_url, stems=stems), 201
+    return jsonify(id=job_id, upload_url=upload_url, stems=stems, credits_left=credits), 201
 
 
 def _read_stage(tenant_id, song_name):
