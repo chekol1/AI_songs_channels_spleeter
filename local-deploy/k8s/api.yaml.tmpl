@@ -25,12 +25,17 @@ spec:
             # Real AWS supplies credentials via the node IAM role / IMDS.
             # Floci has neither, so they are injected explicitly.
             #
-            # This MUST be an address the USER'S BROWSER can reach: web/src/App.jsx
-            # PUTs the song straight to the presigned URL this API signs, so the
-            # signature is computed over this host. A container-internal IP would
-            # produce a URL the browser cannot resolve.
+            #
+            # Server-side calls only, so this is the container-internal address
+            # and does NOT change when the machine moves network. The browser
+            # never sees it. Presigned URLs are signed separately, for whatever
+            # host the caller used -- see presign_client() in api/app.py.
             - name: AWS_ENDPOINT_URL
-              value: http://${HOST_IP}:${FLOCI_PORT}
+              value: http://${FLOCI_IP}:${FLOCI_PORT}
+            # Presence of this switches presigning into emulator mode: sign for
+            # <the Host the request arrived on>:<this port>. Unset on real AWS.
+            - name: S3_PUBLIC_PORT
+              value: "${FLOCI_PORT}"
             - name: AWS_ACCESS_KEY_ID
               value: test
             - name: AWS_SECRET_ACCESS_KEY

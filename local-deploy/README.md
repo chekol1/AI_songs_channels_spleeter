@@ -115,10 +115,17 @@ they are only applied here — `eks-showcase` is untouched.
 - **Nothing is hardcoded.** The host's LAN IP, the Floci/registry/k3s container
   IPs, the RDS host and port, the NodePort and the queue URL are all detected at
   deploy time. Container IPs and NodePorts change between rebuilds.
-- **`AWS_ENDPOINT_URL` on the api pod is the host's LAN IP, deliberately.** The
-  browser PUTs directly to the presigned URL the API signs, so that URL must
-  name a host the browser can reach. A container-internal IP would break uploads
-  while the page still loaded.
+- **Presigned URLs are signed for the host the request arrived on.** The browser
+  PUTs directly to the URL the API signs, and SigV4 signs the host, so that URL
+  must name a host the browser can reach. This used to be solved by baking the
+  machine's LAN IP into `AWS_ENDPOINT_URL` at deploy time -- which meant moving
+  to another network (a different hotspot, a new DHCP lease, a VPN) silently
+  broke every upload and download while `/api/health` still returned 200. Now
+  `AWS_ENDPOINT_URL` is the container-internal address, used for server-side
+  calls only, and `S3_PUBLIC_PORT` switches presigning into emulator mode: each
+  URL is signed for the `Host` the caller used, forwarded by nginx's
+  `proxy_set_header Host $host`. Unset `S3_PUBLIC_PORT` and presigning falls
+  back to the default endpoint, which is what real AWS needs.
 - **Images are pushed via `localhost:5100`, not the ECR-style hostname.** Docker
   refuses plain HTTP to a non-localhost name without `insecure-registries` in
   `/etc/docker/daemon.json`, which needs root. A k3s registry mirror makes the

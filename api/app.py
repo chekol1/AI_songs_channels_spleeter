@@ -13,9 +13,11 @@ reach another tenant's objects. That defence is NOT exercised locally.
 """
 import json
 import os
+import re
 import time
 
 import boto3
+from botocore.config import Config as BotoConfig
 import psycopg2
 import psycopg2.extras
 from flask import Flask, g, jsonify, request
@@ -40,6 +42,56 @@ COGNITO_USER_POOL_ID = os.environ["COGNITO_USER_POOL_ID"]
 
 s3 = boto3.client("s3", region_name=AWS_REGION)
 idp = boto3.client("cognito-idp", region_name=AWS_REGION)
+
+# --------------------------------------------------------------- presigned URLs
+# A presigned URL is handed to the BROWSER, and SigV4 signs the host the URL
+# names -- so it has to be signed with a host the browser can actually reach.
+#
+# This used to be solved by baking the machine's LAN address into
+# AWS_ENDPOINT_URL at deploy time, which made the whole API depend on it: move
+# to a different network (another hotspot, a new DHCP lease, a VPN) and every
+# upload and download breaks, while /api/health still cheerfully answers 200.
+#
+# Instead, split the two uses apart:
+#   * server-side calls  -> AWS_ENDPOINT_URL, a stable container-internal address
+#   * presigned URLs     -> signed for whatever host the caller used to reach us,
+#                           which nginx forwards via `proxy_set_header Host $host`
+#
+# S3_PUBLIC_PORT set   -> emulator: rewrite the host per request
+# neither var set      -> real AWS: sign against the default endpoint, untouched
+S3_PUBLIC_PORT = os.environ.get("S3_PUBLIC_PORT", "").strip()
+S3_PUBLIC_ENDPOINT = os.environ.get("S3_PUBLIC_ENDPOINT", "").strip()
+
+# The Host header is caller-controlled. A bad value can only spoil that same
+# caller's own URL, never another tenant's, but reject anything that is not a
+# plain hostname or IP rather than signing arbitrary text.
+_SAFE_HOST = re.compile(r"^[A-Za-z0-9._-]{1,253}$")
+
+_presign_clients = {}
+
+
+def presign_client():
+    """An S3 client whose endpoint is one the caller's browser can reach."""
+    if not (S3_PUBLIC_PORT or S3_PUBLIC_ENDPOINT):
+        return s3
+    if S3_PUBLIC_ENDPOINT:
+        endpoint = S3_PUBLIC_ENDPOINT
+    else:
+        host = (request.host or "").split(":")[0]
+        if not _SAFE_HOST.match(host):
+            return s3
+        endpoint = f"{request.scheme}://{host}:{S3_PUBLIC_PORT}"
+    client = _presign_clients.get(endpoint)
+    if client is None:
+        # Path style: the emulator is addressed by IP, where a virtual-host
+        # style URL (bucket.<ip>) has nothing to resolve.
+        client = boto3.client(
+            "s3", region_name=AWS_REGION, endpoint_url=endpoint,
+            config=BotoConfig(s3={"addressing_style": "path"}),
+        )
+        _presign_clients[endpoint] = client
+    return client
+
 
 
 def get_conn():
@@ -258,7 +310,7 @@ def create_job():
                     (t["id"],))
         credits = cur.fetchone()[0]
 
-    upload_url = s3.generate_presigned_url(
+    upload_url = presign_client().generate_presigned_url(
         "put_object",
         Params={"Bucket": UPLOAD_BUCKET, "Key": key, "ContentType": "audio/mpeg"},
         ExpiresIn=900,
@@ -346,7 +398,7 @@ def download(job_id):
     if status != "done":
         return jsonify(error="job not finished yet"), 409
 
-    url = s3.generate_presigned_url(
+    url = presign_client().generate_presigned_url(
         "get_object",
         Params={"Bucket": RESULTS_BUCKET, "Key": _result_key(t["id"], song_name)},
         ExpiresIn=900,
