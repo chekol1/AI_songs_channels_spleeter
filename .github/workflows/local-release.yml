@@ -1,0 +1,174 @@
+# Release pipeline for the LOCAL (Floci) deployment.
+#
+#   push to floci-local-deployment that touches api/, web/ or worker/
+#     -> next version number (local-vX.Y.Z)
+#     -> build ONLY the components that changed, on the home build machine
+#     -> push the images to the registry on the lab server
+#     -> write the new tag into local-deploy/gitops and commit it
+#     -> Argo CD sees that commit and rolls it out (it checks Git every ~3 min)
+#
+# Nobody runs kubectl. Rolling back = reverting the "release:" commit.
+#
+# Version bump: the last number goes up on every release. Put #minor or #major
+# anywhere in a commit message to raise the middle or the first number instead.
+#
+# This workflow never runs for pull requests: it executes on a machine inside
+# the home network, so only code already on the branch may reach it.
+name: Local release
+
+on:
+  push:
+    branches: [floci-local-deployment]
+    paths: ["api/**", "web/**", "worker/**"]
+
+# One release at a time; a second push waits instead of racing on the version.
+concurrency:
+  group: local-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write     # commit the new tag into the manifests, push the git tag
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # The lab server's registry, reachable on the home network only.
+  REGISTRY: 192.168.1.139:5101
+  # Real releases are local-v*. Any other branch this file is tried out on
+  # gets test-v*, so a trial can never take a real version number.
+  TAG_PREFIX: ${{ github.ref_name == 'floci-local-deployment' && 'local-v' || 'test-v' }}
+
+jobs:
+  release:
+    runs-on: [self-hosted, sonicloud-builder]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0      # full history: tags for the version, diff for what changed
+
+      - name: Plan the release
+        id: plan
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          # --- what changed ---------------------------------------------------
+          if [[ -z "$BEFORE" || "$BEFORE" =~ ^0+$ ]] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "No previous commit to compare with (new branch or rewritten history): building everything."
+            changed="api web worker"
+            messages="$(git log -1 --format=%B "$GITHUB_SHA")"
+          else
+            changed=""
+            for c in api web worker; do
+              git diff --quiet "$BEFORE" "$GITHUB_SHA" -- "$c/" || changed="$changed $c"
+            done
+            messages="$(git log --format=%B "$BEFORE..$GITHUB_SHA")"
+          fi
+          changed="$(echo $changed)"
+          if [ -z "$changed" ]; then
+            echo "Nothing under api/, web/ or worker/ differs. No release."
+            echo "changed=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # --- next version ---------------------------------------------------
+          # Highest existing git tag with our prefix; before the first release,
+          # the highest version the manifests already mention.
+          last="$(git tag -l "${TAG_PREFIX}*" | sed "s/^${TAG_PREFIX}//" \
+                    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)"
+          if [ -z "$last" ]; then
+            last="$(grep -rhoE 'sonicloud-(api|web|worker):[a-z]+-v[0-9]+\.[0-9]+\.[0-9]+' local-deploy/gitops \
+                      | sed 's/.*-v//' | sort -V | tail -n1 || true)"
+          fi
+          last="${last:-0.0.0}"
+          IFS=. read -r major minor patch <<< "$last"
+          if   grep -q '#major' <<< "$messages"; then major=$((major+1)); minor=0; patch=0
+          elif grep -q '#minor' <<< "$messages"; then minor=$((minor+1)); patch=0
+          else patch=$((patch+1)); fi
+          version="${TAG_PREFIX}${major}.${minor}.${patch}"
+
+          echo "Previous version: $last"
+          echo "This release:     $version"
+          echo "Components:       $changed"
+          echo "changed=$changed"  >> "$GITHUB_OUTPUT"
+          echo "version=$version"  >> "$GITHUB_OUTPUT"
+
+      - name: Build and push images
+        if: steps.plan.outputs.changed != ''
+        env:
+          CHANGED: ${{ steps.plan.outputs.changed }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          curl -sf -m 10 "http://$REGISTRY/v2/" >/dev/null \
+            || { echo "::error::Cannot reach the registry at $REGISTRY. Is the lab server up and on the same network as this build machine?"; exit 1; }
+
+          for c in $CHANGED; do
+            image="$REGISTRY/sonicloud-$c:$VERSION"
+            # A release tag is published once. Cluster nodes cache images by
+            # tag, so replacing one would leave old and new code under one name.
+            if curl -sf -m 10 "http://$REGISTRY/v2/sonicloud-$c/tags/list" | grep -q "\"$VERSION\""; then
+              echo "::error::sonicloud-$c:$VERSION already exists in the registry. Refusing to overwrite a release."
+              exit 1
+            fi
+            echo "::group::build sonicloud-$c:$VERSION"
+            docker build --progress=plain -t "$image" "$c"
+            echo "::endgroup::"
+            docker push "$image"
+            docker image rm "$image" >/dev/null 2>&1 || true   # keep the build machine's disk free; layers stay cached
+          done
+
+      - name: Write the new tag into the manifests
+        if: steps.plan.outputs.changed != ''
+        env:
+          CHANGED: ${{ steps.plan.outputs.changed }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          bump() {
+            for c in $CHANGED; do
+              f="local-deploy/gitops/$c.yaml"
+              sed -i "s|\(/sonicloud-$c:\)[^ ]*|\1$VERSION|" "$f"
+              grep -q "/sonicloud-$c:$VERSION" "$f" \
+                || { echo "::error::could not set the image tag in $f"; exit 1; }
+              git add "$f"
+            done
+          }
+
+          # Someone may have pushed while the images were building. Start from
+          # the newest branch tip each time and retry a few times.
+          for attempt in 1 2 3 4 5; do
+            git fetch -q origin "$GITHUB_REF_NAME"
+            git reset -q --hard "origin/$GITHUB_REF_NAME"
+            bump
+            git commit -q -m "release: $VERSION (${CHANGED// /, })" \
+                          -m "Built from $GITHUB_SHA by the Local release workflow."
+            if git push -q origin "HEAD:refs/heads/$GITHUB_REF_NAME"; then
+              git tag "$VERSION"
+              git push -q origin "refs/tags/$VERSION"
+              echo "Committed and tagged $VERSION."
+              exit 0
+            fi
+            echo "Push was rejected (attempt $attempt), retrying ..."
+            sleep $((attempt * 3))
+          done
+          echo "::error::could not push the release commit after 5 attempts"
+          exit 1
+
+      - name: Summary
+        if: steps.plan.outputs.changed != ''
+        run: |
+          {
+            echo "### Released ${{ steps.plan.outputs.version }}"
+            echo ""
+            echo "Components: ${{ steps.plan.outputs.changed }}"
+            echo ""
+            echo "Argo CD picks this up from Git within a few minutes."
+          } >> "$GITHUB_STEP_SUMMARY"

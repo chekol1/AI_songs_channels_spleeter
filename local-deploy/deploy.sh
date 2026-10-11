@@ -296,6 +296,10 @@ EOF
   fi
   akc -n "$ARGOCD_NAMESPACE" annotate application "$ARGOCD_APP_NAME" \
     argocd.argoproj.io/refresh=hard --overwrite >/dev/null
+  # Argo CD removes that annotation once it has re-read Git. Until then the
+  # status still describes the PREVIOUS revision, so wait for it first.
+  wait_for 90 "Argo CD re-read Git" \
+    bash -c "[ -z \"\$(kubectl --kubeconfig '$ARGOCD_KUBECONFIG' -n '$ARGOCD_NAMESPACE' get application '$ARGOCD_APP_NAME' -o jsonpath='{.metadata.annotations.argocd\.argoproj\.io/refresh}')\" ]" || true
   app_state() { akc -n "$ARGOCD_NAMESPACE" get application "$ARGOCD_APP_NAME" \
                   -o jsonpath='{.status.sync.status}/{.status.health.status}' 2>/dev/null; }
   if wait_for 420 "Argo CD application $ARGOCD_APP_NAME synced and healthy" \
