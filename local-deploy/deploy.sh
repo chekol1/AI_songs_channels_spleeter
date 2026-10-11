@@ -132,6 +132,23 @@ if ! grep -q '"type": *"s3"' .terraform/terraform.tfstate 2>/dev/null; then
   terraform init -input=false -reconfigure >"$SONICLOUD_HOME/terraform-init.log" 2>&1 \
     || { tail -n 30 "$SONICLOUD_HOME/terraform-init.log" >&2; die "terraform init failed"; }
 fi
+# The image registry has its own volume, and Floci lists a repository for every
+# image folder it finds there. So after Floci's data was deleted but the images
+# were kept (teardown --destroy-data without --all), the repositories exist
+# while the fresh state knows nothing about them, and "create" fails with
+# RepositoryAlreadyExists. Adopt them into the state instead.
+tf_state="$(terraform state list 2>/dev/null || true)"
+while read -r addr repo; do
+  grep -qxF "$addr" <<< "$tf_state" && continue
+  aws_local ecr describe-repositories --repository-names "$repo" >/dev/null 2>&1 || continue
+  terraform import -input=false "$addr" "$repo" >>"$SONICLOUD_HOME/terraform-init.log" 2>&1 \
+    && c_info "adopted existing image repository $repo" \
+    || c_warn "could not adopt image repository $repo (terraform apply may fail on it)"
+done <<'REPOS'
+aws_ecr_repository.worker_app sonicloud-worker
+aws_ecr_repository.app_tiers["sonicloud-web"] sonicloud-web
+aws_ecr_repository.app_tiers["sonicloud-api"] sonicloud-api
+REPOS
 terraform apply -auto-approve -input=false >"$SONICLOUD_HOME/terraform-apply.log" 2>&1 || {
   tail -n 40 "$SONICLOUD_HOME/terraform-apply.log" >&2
   die "terraform apply failed (full output: $SONICLOUD_HOME/terraform-apply.log)"; }
