@@ -36,18 +36,61 @@ The first run is slow — the terraform AWS provider is ~146 MB, the worker imag
 builds TensorFlow (~586 MB wheel), and the Spleeter models are ~76 MB. Expect
 **30–60 minutes** on a modest connection.
 
-`deploy.sh` is **idempotent**; a re-run with nothing changed takes about **60
-seconds**. Images are keyed by a hash of their build context, so changing source
-rebuilds only what changed. Re-run it after every reboot: Floci keeps no state,
-so everything is recreated (the models and images are cached, so it is quick).
+`deploy.sh` is **idempotent**; a re-run with nothing changed takes about **40
+seconds**. It is the one way things are brought up: first install, after a
+reboot, after `stop.sh`, after pulling new code.
+
+## Day to day
 
 ```bash
-bash local-deploy/deploy.sh                 # deploy or re-deploy
-FORCE_BUILD=1 bash local-deploy/deploy.sh   # rebuild all images
-SKIP_BUILD=1  bash local-deploy/deploy.sh   # never build, use the registry
-bash local-deploy/teardown.sh               # stop everything, keep caches
-bash local-deploy/teardown.sh --all         # also drop models and images
+bash local-deploy/stop.sh      # free RAM and CPU. Deletes nothing.
+bash local-deploy/start.sh     # bring it back exactly as it was (= deploy.sh + a log file)
 ```
+
+To have a reboot put it back the way it was (needs sudo once):
+
+```bash
+bash local-deploy/install-service.sh
+```
+
+With the service installed, a reboot restores the state from before it: if
+SoniCloud was up it is started again; if you had stopped it, torn it down, or
+never deployed it, nothing is started.
+
+## Where the state lives
+
+The clone is disposable. Delete it, clone it again later, run `deploy.sh`, and
+you get the same deployment with the same data.
+
+| What | Where |
+|---|---|
+| Buckets, queues, users, cluster and database definitions | docker volume `sonicloud-floci-data` (Floci in persistent mode) |
+| Terraform state | bucket `sonicloud-tfstate` inside Floci |
+| Database rows | docker volume `floci-rds-db-…` |
+| Cluster (workloads, model volume) | docker volume `floci-eks-sonicloud-eks` |
+| Images | docker volume `floci-ecr-registry-data` |
+| Models, logs, terraform providers, machine settings | `~/.sonicloud/` |
+
+Machine-specific settings go in `~/.sonicloud/env`, one `KEY=value` per line,
+for example `INGRESS_PORT=8088`, `FLOCI_CONTAINER_NAME=floci`,
+`PREBUILT_WORKER=1`.
+
+## Releases
+
+Images are not built by `deploy.sh`. A push that changes `api/`, `web/` or
+`worker/` runs the *Local release* workflow, which builds the image, tags it
+`local-vX.Y.Z` and writes the tag into `local-deploy/gitops/`; Argo CD deploys
+it. `deploy.sh` only builds when the pinned tag is missing from the registry
+(a new machine).
+
+## Deleting it
+
+```bash
+bash local-deploy/teardown.sh --destroy-data         # database, buckets, users, cluster
+bash local-deploy/teardown.sh --destroy-data --all   # also models, images, registry
+```
+
+Without `--destroy-data` it does nothing and says so.
 
 ## What it stands up
 
@@ -133,15 +176,20 @@ they are only applied here — `eks-showcase` is untouched.
 - **`rancher/k3s` and `postgres:16-alpine` are pre-pulled.** Floci's internal
   image pull times out after ~60 s, which is what makes EKS and RDS fail on a
   first run.
-- **Models are cached at `local-deploy/.cache/` (gitignored)** and seeded into a
-  PVC, so no pod ever re-downloads them.
+- **Models are cached at `~/.sonicloud/models/`** and seeded into a PVC, so no
+  pod ever re-downloads them.
+- **After a reboot the cluster container is checked, not trusted.** Floci keeps
+  reporting the cluster as ACTIVE while its container is stopped or
+  crash-looping on a changed address. `deploy.sh` restarts it, or removes it so
+  Floci rebuilds it from the cluster's volume, then removes the node object and
+  any node-bound volume the old container left behind.
 
 ## Troubleshooting
 
 **`api` CrashLoopBackOff** — usually the DB. `kc logs -l app=api --previous`.
 
 **`web` CrashLoopBackOff with `host not found in upstream`** — you are running an
-image built before the nginx fix. `FORCE_BUILD=1 bash local-deploy/deploy.sh`.
+image built before the nginx fix. Release a new web image (any change under `web/`).
 
 **502 from `/api/`** — nginx cannot resolve the upstream. It must be an FQDN;
 nginx's `resolver` ignores the search domains in `/etc/resolv.conf`.
