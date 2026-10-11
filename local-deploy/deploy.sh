@@ -85,6 +85,15 @@ QUEUE_URL="${QUEUE_URL/localhost/$FLOCI_IP}"
 
 # ------------------------------------------------------------------ 5. registry
 step "5/9  container images"
+# Floci creates the ECR registry container LAZILY -- on the first
+# GetAuthorizationToken call, not when terraform creates the repositories. On a
+# cold machine nothing has asked for a token yet, so the container does not
+# exist and this step died with "the floci ECR registry container is not
+# running". Earlier runs only passed because a registry was left over from a
+# previous attempt. Ask for a token, then wait for the container.
+aws_local ecr get-authorization-token >/dev/null 2>&1 || true
+wait_for 60 "floci ECR registry container" \
+  bash -c "[ \"\$(docker inspect -f '{{.State.Running}}' $REGISTRY_CONTAINER 2>/dev/null)\" = true ]"
 REGISTRY_IP="$(container_ip "$REGISTRY_CONTAINER" bridge)"
 [ -n "$REGISTRY_IP" ] || die "the floci ECR registry container is not running"
 c_ok "registry at $REGISTRY_IP:5000 (published on localhost:$REGISTRY_PORT)"
@@ -107,6 +116,11 @@ else
        && curl -sf -m 5 "http://localhost:$REGISTRY_PORT/v2/sonicloud-$svc/tags/list" \
           | grep -q "\"$tag\""; then
       c_ok "sonicloud-$svc up to date ($tag)"
+    elif [ "$svc" = worker ] && [ "${PREBUILT_WORKER:-0}" = "1" ] \
+         && docker image inspect sonicloud-worker:local >/dev/null 2>&1; then
+      # Slow uplink: the worker image was built OFFLINE from pre-fetched debs
+      # and wheels (~/sonic-work/build-worker-offline.sh). Reuse it as-is.
+      c_ok "sonicloud-worker: using the prebuilt offline image (PREBUILT_WORKER=1)"
     else
       if [ "$svc" = worker ]; then
         c_info "building sonicloud-$svc ($tag) -- ~4.3GB with TensorFlow, this takes a while ..."
@@ -183,8 +197,11 @@ done
 
 # --------------------------------------------------------------- 8. seed models
 step "8/9  seeding the model cache into the cluster"
+# Newest pod, not items[0]: right after a rollout the OLD pod is still listed
+# as Running while it terminates, and exec into it fails with "container not found".
 WPOD="$(kcn get pods -l app=worker --field-selector status.phase=Running \
-        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+        --sort-by=.metadata.creationTimestamp \
+        -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null || true)"
 if [ -z "$WPOD" ]; then
   c_warn "no running worker pod; skipping seed (rerun deploy.sh once it is up)"
 elif docker exec "$EKS_CONTAINER" kubectl -n "$NAMESPACE" exec "$WPOD" -- test -f /models/2stems/model.index 2>/dev/null; then

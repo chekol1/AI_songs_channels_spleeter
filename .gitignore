@@ -28,3 +28,6 @@ aws_creds.sh
 # Node
 node_modules/
 web/dist/
+
+# Pre-fetched wheels for slow links (see api/Dockerfile). Binary, machine-local.
+api/wheels/*.whl

@@ -9,6 +9,8 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
+# Slow/high-latency uplink: pip's 15s default read timeout aborts mid-wheel.
+ENV PIP_DEFAULT_TIMEOUT=180 PIP_RETRIES=10
 RUN pip install --no-cache-dir boto3 spleeter
 
 COPY worker.py .
