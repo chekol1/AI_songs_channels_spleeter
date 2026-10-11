@@ -1,3 +1,4 @@
+# Web tier, as Argo CD deploys it. See api.yaml for how this folder works.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,12 +14,12 @@ spec:
     spec:
       containers:
         - name: web
-          image: ${ECR_HOST}/sonicloud-web:latest
-          imagePullPolicy: Always
+          image: 000000000000.dkr.ecr.us-east-1.localhost:5100/sonicloud-web:local-v0.1.0
+          imagePullPolicy: IfNotPresent
           env:
             # FQDN required: nginx's resolver ignores resolv.conf search domains.
             - name: API_UPSTREAM
-              value: http://api-service.${NAMESPACE}.svc.cluster.local:5000
+              value: http://api-service.sonicloud.svc.cluster.local:5000
           ports:
             - containerPort: 80
           readinessProbe:
