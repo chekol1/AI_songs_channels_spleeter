@@ -142,7 +142,7 @@ function Auth({ onToken }) {
         <div style={{ display: 'grid', gap: 11 }}>
           <input className="field" placeholder="you@studio.com" value={email}
                  onChange={e => setEmail(e.target.value)} onKeyDown={e => e.key === 'Enter' && submit()} />
-          <input className="field" placeholder="password — 8+ characters, one number" type="password"
+          <input className="field" placeholder="password — 8+ characters, a lowercase letter and a number" type="password"
                  value={password} onChange={e => setPassword(e.target.value)}
                  onKeyDown={e => e.key === 'Enter' && submit()} />
           {err && <div style={{ color: 'var(--danger)', fontSize: 14 }}>{err}</div>}
