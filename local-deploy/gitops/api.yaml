@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: 000000000000.dkr.ecr.us-east-1.localhost:5100/sonicloud-api:local-v0.1.0
+          image: 000000000000.dkr.ecr.us-east-1.localhost:5100/sonicloud-api:local-v0.1.1
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5000
