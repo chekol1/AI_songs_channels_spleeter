@@ -8,7 +8,9 @@ locals {
 resource "aws_ecr_repository" "app_tiers" {
   for_each             = toset(local.app_repos)
   name                 = each.key
-  image_tag_mutability = "MUTABLE"
+  # A released version must always mean the same image. With mutable tags
+  # (and ":latest") nobody can tell what is running, and a rollback is a guess.
+  image_tag_mutability = "IMMUTABLE"
   force_delete         = true
 
   image_scanning_configuration {

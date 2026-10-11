@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: web
-          image: 010686621615.dkr.ecr.us-east-1.amazonaws.com/sonicloud-web:latest
+          image: 010686621615.dkr.ecr.us-east-1.amazonaws.com/sonicloud-web:v0.1.0
           env:
             # nginx now resolves its upstream per-request, and its resolver does
             # NOT apply the search domains in /etc/resolv.conf -- so this must be

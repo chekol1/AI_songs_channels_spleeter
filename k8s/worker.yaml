@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: worker
-          image: 010686621615.dkr.ecr.us-east-1.amazonaws.com/sonicloud-worker:latest
+          image: 010686621615.dkr.ecr.us-east-1.amazonaws.com/sonicloud-worker:v0.1.0
           env:
             - name: AWS_REGION
               value: us-east-1

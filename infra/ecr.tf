@@ -1,6 +1,8 @@
 resource "aws_ecr_repository" "worker_app" {
   name                 = "sonicloud-worker"
-  image_tag_mutability = "MUTABLE"
+  # A released version must always mean the same image. With mutable tags
+  # (and ":latest") nobody can tell what is running, and a rollback is a guess.
+  image_tag_mutability = "IMMUTABLE"
 
   # CRITICAL: This allows 'terraform destroy' to remove the repo even if it has images
   force_delete = true

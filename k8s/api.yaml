@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: 010686621615.dkr.ecr.us-east-1.amazonaws.com/sonicloud-api:latest
+          image: 010686621615.dkr.ecr.us-east-1.amazonaws.com/sonicloud-api:v0.1.0
           ports:
             - containerPort: 5000
           env:

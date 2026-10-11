@@ -54,39 +54,23 @@ resource "aws_iam_role_policy" "github_actions_permissions" {
           "ecr:UploadLayerPart",
           "ecr:CompleteLayerUpload",
           "ecr:PutImage",
-          "ecr:DescribeRepositories"
+          "ecr:DescribeRepositories",
+          "ecr:DescribeImages" # "is this version already released?"
         ]
         Resource = [
           aws_ecr_repository.worker_app.arn,
           aws_ecr_repository.app_tiers["sonicloud-web"].arn,
           aws_ecr_repository.app_tiers["sonicloud-api"].arn,
         ]
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["eks:DescribeCluster"]
-        Resource = aws_eks_cluster.main.arn
       }
     ]
   })
 }
 
-# Kubernetes-side access: let the CI role run kubectl (rollout restart)
-resource "aws_eks_access_entry" "github_actions" {
-  cluster_name  = aws_eks_cluster.main.name
-  principal_arn = aws_iam_role.github_actions.arn
-}
-
-resource "aws_eks_access_policy_association" "github_actions_admin" {
-  cluster_name  = aws_eks_cluster.main.name
-  principal_arn = aws_iam_role.github_actions.arn
-  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-
-  access_scope {
-    type       = "namespace"
-    namespaces = ["sonicloud"]
-  }
-}
+# No Kubernetes access for the pipeline, on purpose. It used to run
+# "kubectl rollout restart", which needed admin rights in the namespace. Now it
+# only pushes an image and commits a tag; Argo CD, inside the cluster, does the
+# deploying. A leaked pipeline credential can no longer touch the cluster.
 
 # Cluster admin access for the human operator (the terraform/CLI user)
 resource "aws_eks_access_entry" "admin_user" {
