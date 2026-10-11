@@ -193,7 +193,7 @@ def tenant_prefix(tenant_id):
 # ------------------------------------------------------------------------- routes
 @app.get("/api/health")
 def health():
-    return jsonify(status="ok")
+    return jsonify(status="ok", service="sonicloud-api")
 
 
 @app.get("/api/config")
