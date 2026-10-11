@@ -31,3 +31,4 @@ web/dist/
 
 # Pre-fetched wheels for slow links (see api/Dockerfile). Binary, machine-local.
 api/wheels/*.whl
+infra/zz_adopt_existing.tf

@@ -137,13 +137,17 @@ fi
 # were kept (teardown --destroy-data without --all), the repositories exist
 # while the fresh state knows nothing about them, and "create" fails with
 # RepositoryAlreadyExists. Adopt them into the state instead.
+# Terraform "import" blocks do that as part of the normal apply; the file is
+# written only when needed and removed again right after.
+adopt_file="zz_adopt_existing.tf"
+rm -f "$adopt_file"
+trap 'rm -f "$REPO_ROOT/infra/$adopt_file"' EXIT
 tf_state="$(terraform state list 2>/dev/null || true)"
 while read -r addr repo; do
   grep -qxF "$addr" <<< "$tf_state" && continue
   aws_local ecr describe-repositories --repository-names "$repo" >/dev/null 2>&1 || continue
-  terraform import -input=false "$addr" "$repo" >>"$SONICLOUD_HOME/terraform-init.log" 2>&1 \
-    && c_info "adopted existing image repository $repo" \
-    || c_warn "could not adopt image repository $repo (terraform apply may fail on it)"
+  printf 'import {\n  to = %s\n  id = "%s"\n}\n' "$addr" "$repo" >> "$adopt_file"
+  c_info "adopting existing image repository $repo"
 done <<'REPOS'
 aws_ecr_repository.worker_app sonicloud-worker
 aws_ecr_repository.app_tiers["sonicloud-web"] sonicloud-web
@@ -152,6 +156,7 @@ REPOS
 terraform apply -auto-approve -input=false >"$SONICLOUD_HOME/terraform-apply.log" 2>&1 || {
   tail -n 40 "$SONICLOUD_HOME/terraform-apply.log" >&2
   die "terraform apply failed (full output: $SONICLOUD_HOME/terraform-apply.log)"; }
+rm -f "$adopt_file"
 c_ok "$(terraform state list | wc -l) resources ($(grep -Eo 'Resources: .*' "$SONICLOUD_HOME/terraform-apply.log" | tail -n1 | sed 's/\x1b\[[0-9;]*m//g'))"
 DB_PASSWORD="$(terraform output -raw db_password)"
 COGNITO_USER_POOL_ID="$(terraform output -raw cognito_user_pool_id)"
