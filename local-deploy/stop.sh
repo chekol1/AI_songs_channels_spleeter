@@ -5,7 +5,8 @@
 #   bash local-deploy/stop.sh      # stop
 #   bash local-deploy/start.sh     # bring it back exactly as it was
 #
-# It also stays stopped across a reboot, until you run start.sh yourself.
+# A reboot puts things back the way they were: stopped stays stopped, until
+# you run start.sh yourself.
 #   --keep-autostart   stop now, but let it start again at the next boot
 #                      (this is what the system uses at shutdown)
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
@@ -29,7 +30,7 @@ fi
 if [ "${1:-}" = "--keep-autostart" ]; then
   c_info "it will start again at the next boot"
 else
-  date > "$STOP_MARKER"
+  rm -f "$RUN_MARKER"
   c_info "it stays stopped, also after a reboot, until: bash local-deploy/start.sh"
 fi
 step "done"

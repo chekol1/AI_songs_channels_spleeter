@@ -29,7 +29,8 @@ if [ "${avail_gb:-0}" -lt 12 ]; then
   c_warn "only ${avail_gb}G free on / -- the worker image alone is ~4.3GB."
   c_warn "if the disk fills, kubelet taints the node and evicts pods. 15G+ recommended."
 fi
-rm -f "$STOP_MARKER"
+# From here on the intent is "up": a reboot brings it back (see start.sh --boot).
+date > "$RUN_MARKER"; rm -f "$SONICLOUD_HOME/stopped"
 
 # ------------------------------------------------------------------- 1. models
 step "1/10  spleeter model cache"

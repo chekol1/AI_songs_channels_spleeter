@@ -64,7 +64,7 @@ compose down -v >/dev/null 2>&1 && c_ok "floci down, volume removed" || c_info "
 # Only the pointer to the (now deleted) state. The downloaded providers stay:
 # they are large and have nothing to do with the data.
 rm -f "$REPO_ROOT/infra/.terraform/terraform.tfstate" "$REPO_ROOT"/infra/terraform.tfstate*
-rm -f "$STOP_MARKER"
+rm -f "$RUN_MARKER"
 
 if [ "$ALL" = 1 ]; then
   step "removing cached models and built images"

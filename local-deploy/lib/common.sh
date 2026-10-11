@@ -15,7 +15,8 @@ LOCAL_DIR="$REPO_ROOT/local-deploy"
 #   env      machine-specific settings (KEY=value lines), read below
 #   models/  the downloaded Spleeter models
 #   logs/    output of unattended starts
-#   stopped  marker: "the owner stopped it on purpose, do not start at boot"
+#   running  marker: "it was up". Only then is it started again at boot, so a
+#            reboot returns the machine to the state it was in before.
 SONICLOUD_HOME="${SONICLOUD_HOME:-$HOME/.sonicloud}"
 mkdir -p "$SONICLOUD_HOME"
 if [ -f "$SONICLOUD_HOME/env" ]; then
@@ -25,7 +26,7 @@ CACHE_DIR="${SONICLOUD_CACHE:-$SONICLOUD_HOME}"
 # Fixed docker compose project name, so the clone's path does not matter.
 COMPOSE_PROJECT="sonicloud"
 TFSTATE_BUCKET="${TFSTATE_BUCKET:-sonicloud-tfstate}"
-STOP_MARKER="$SONICLOUD_HOME/stopped"
+RUN_MARKER="$SONICLOUD_HOME/running"
 
 # --- config knobs (override via env) ---------------------------------------
 CLUSTER_NAME="${CLUSTER_NAME:-sonicloud-eks}"

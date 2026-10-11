@@ -47,14 +47,15 @@ bash local-deploy/stop.sh      # free RAM and CPU. Deletes nothing.
 bash local-deploy/start.sh     # bring it back exactly as it was (= deploy.sh + a log file)
 ```
 
-After `stop.sh` it stays stopped, also across a reboot, until you run
-`start.sh`.
-
-To have it come back by itself after a reboot (needs sudo once):
+To have a reboot put it back the way it was (needs sudo once):
 
 ```bash
 bash local-deploy/install-service.sh
 ```
+
+With the service installed, a reboot restores the state from before it: if
+SoniCloud was up it is started again; if you had stopped it, torn it down, or
+never deployed it, nothing is started.
 
 ## Where the state lives
 

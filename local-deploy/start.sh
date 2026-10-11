@@ -4,12 +4,14 @@
 #
 #   bash local-deploy/start.sh
 #   bash local-deploy/start.sh --boot    # how the system calls it at boot:
-#                                        # does nothing if you stopped it on purpose
+#                                        # starts it only if it was up before
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 
 if [ "${1:-}" = "--boot" ]; then
-  if [ -f "$STOP_MARKER" ]; then
-    echo "SoniCloud was stopped on purpose ($(cat "$STOP_MARKER")). Not starting. Run: bash local-deploy/start.sh"
+  # A reboot must return the machine to how it was. Up before -> start it.
+  # Stopped, torn down or never deployed -> leave it alone.
+  if [ ! -f "$RUN_MARKER" ]; then
+    echo "SoniCloud was not running before this boot. Not starting it. To start: bash local-deploy/start.sh"
     exit 0
   fi
   # Argo CD lives in another cluster on this machine that is booting too.

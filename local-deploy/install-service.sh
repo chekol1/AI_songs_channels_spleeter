@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Make SoniCloud come back by itself after a reboot (systemd).
+# Make a reboot return SoniCloud to the state it was in (systemd):
+# up before the reboot -> started again; stopped or not deployed -> left alone.
 #
 #   bash local-deploy/install-service.sh            # needs sudo once
 #   bash local-deploy/install-service.sh --remove
@@ -53,4 +54,5 @@ sudo install -m 644 "$tmp" "$UNIT" && sudo systemctl daemon-reload && sudo syste
 rm -f "$tmp"
 c_ok "installed and enabled"
 c_info "at boot it runs:  start.sh --boot     (log: $SONICLOUD_HOME/logs/)"
+c_info "it starts SoniCloud at boot only if it was up before the reboot"
 c_info "it was NOT started now; the running deployment is untouched"
