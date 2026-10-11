@@ -8,6 +8,28 @@
 # Every service the repo's resources actually call needs an endpoint entry.
 # ---------------------------------------------------------------------------
 
+# Terraform's state lives in a bucket INSIDE Floci, the same way it lives in an
+# S3 bucket on real AWS. Floci keeps the bucket on its volume, so the state
+# survives a reboot and a deleted clone. deploy.sh creates the bucket.
+terraform {
+  backend "s3" {
+    bucket = "sonicloud-tfstate"
+    key    = "local/terraform.tfstate"
+    region = "us-east-1"
+
+    endpoints  = { s3 = "http://localhost:4566" }
+    access_key = "test"
+    secret_key = "test"
+
+    use_path_style              = true
+    use_lockfile                = true # lock file in the bucket; no DynamoDB table needed
+    skip_credentials_validation = true
+    skip_metadata_api_check     = true
+    skip_requesting_account_id  = true
+    skip_region_validation      = true
+  }
+}
+
 provider "aws" {
   region     = "us-east-1"
   access_key = "test"

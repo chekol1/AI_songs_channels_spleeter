@@ -1,14 +1,21 @@
 # Floci: the local AWS emulator this deployment targets.
 # Self-contained -- does not depend on any other stack on the machine.
+#
+# Fixed project and volume names: the deployment's state must not depend on
+# which folder this repository happens to be cloned into.
+name: sonicloud
+
 services:
   floci:
     image: ${FLOCI_IMAGE:-floci/floci:latest}
-    container_name: sonicloud-floci
+    container_name: ${FLOCI_CONTAINER_NAME:-sonicloud-floci}
     ports:
       - "${FLOCI_PORT:-4566}:4566"
     environment:
-      # Deliberately NO FLOCI_STORAGE_MODE: the image ships no default for it
-      # and refuses to boot on an unknown value.
+      # Keep everything (buckets, queues, users, the cluster and database
+      # definitions, the Terraform state bucket) on the volume below, so a
+      # restart or a reboot brings it all back. Without this Floci starts empty.
+      FLOCI_STORAGE_MODE: persistent
       DEBUG: "0"
     volumes:
       # Floci backs EKS/RDS/ECR with REAL containers, so it needs the socket.
@@ -32,6 +39,7 @@ services:
 
 volumes:
   floci-data:
+    name: sonicloud-floci-data
 
 networks:
   sonicloud-net:

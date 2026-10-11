@@ -7,7 +7,25 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LOCAL_DIR="$REPO_ROOT/local-deploy"
-CACHE_DIR="${SONICLOUD_CACHE:-$LOCAL_DIR/.cache}"
+
+# --- where this machine keeps its state -------------------------------------
+# The Git clone is disposable: delete it, clone again next month, and the
+# deployment must come back exactly as it was. So nothing that matters lives in
+# the clone. It lives in docker volumes with fixed names, and in this folder:
+#   env      machine-specific settings (KEY=value lines), read below
+#   models/  the downloaded Spleeter models
+#   logs/    output of unattended starts
+#   stopped  marker: "the owner stopped it on purpose, do not start at boot"
+SONICLOUD_HOME="${SONICLOUD_HOME:-$HOME/.sonicloud}"
+mkdir -p "$SONICLOUD_HOME"
+if [ -f "$SONICLOUD_HOME/env" ]; then
+  set -a; . "$SONICLOUD_HOME/env"; set +a
+fi
+CACHE_DIR="${SONICLOUD_CACHE:-$SONICLOUD_HOME}"
+# Fixed docker compose project name, so the clone's path does not matter.
+COMPOSE_PROJECT="sonicloud"
+TFSTATE_BUCKET="${TFSTATE_BUCKET:-sonicloud-tfstate}"
+STOP_MARKER="$SONICLOUD_HOME/stopped"
 
 # --- config knobs (override via env) ---------------------------------------
 CLUSTER_NAME="${CLUSTER_NAME:-sonicloud-eks}"
@@ -19,6 +37,9 @@ REGISTRY_PORT="${REGISTRY_PORT:-5100}"
 # 8088, not 80: on a shared lab server port 80 usually belongs to something
 # else already (here: the lab cluster's Traefik). INGRESS_PORT=80 to override.
 INGRESS_PORT="${INGRESS_PORT:-8088}"
+# Name to give the Floci container when it is created. A lab server whose
+# other tools expect a different name sets this in ~/.sonicloud/env.
+export FLOCI_CONTAINER_NAME="${FLOCI_CONTAINER_NAME:-sonicloud-floci}"
 # Empty means "find it": see resolve_floci_container below.
 FLOCI_CONTAINER="${FLOCI_CONTAINER:-}"
 EKS_CONTAINER="floci-eks-${CLUSTER_NAME}"
@@ -85,17 +106,24 @@ resolve_floci_container() {
       || die "FLOCI_CONTAINER=$FLOCI_CONTAINER is set, but no such container exists"
     return 0
   fi
-  name="$(docker ps \
-            --filter "label=com.docker.compose.project.working_dir=$LOCAL_DIR" \
+  name="$(docker ps -a \
+            --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" \
             --filter "label=com.docker.compose.service=floci" \
             --format '{{.Names}}' | head -n1)"
   if [ -z "$name" ]; then
-    for name in sonicloud-floci floci ""; do
+    for name in "$FLOCI_CONTAINER_NAME" sonicloud-floci floci ""; do
       [ -n "$name" ] && docker inspect "$name" >/dev/null 2>&1 && break
     done
   fi
   [ -n "$name" ] || die "cannot find the Floci container (is it running? docker ps). Set FLOCI_CONTAINER=<name> to point at it."
   FLOCI_CONTAINER="$name"
+}
+
+compose() { docker compose -p "$COMPOSE_PROJECT" -f "$LOCAL_DIR/floci-compose.yml" "$@"; }
+
+# Every container Floci started for this deployment (cluster, database, registry).
+floci_spawned() {   # floci_spawned [-a]
+  docker ps "$@" --format '{{.Names}}' | grep -E '^floci-(eks|rds|ecr)-' || true
 }
 
 # kubectl against the LAB cluster, where Argo CD lives (not SoniCloud's cluster).
