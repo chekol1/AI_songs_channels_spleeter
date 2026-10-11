@@ -61,7 +61,9 @@ step "removing floci and its data"
 # No "terraform destroy": the state is in a bucket inside Floci, and Floci's
 # whole volume goes now, so resources and state disappear together.
 compose down -v >/dev/null 2>&1 && c_ok "floci down, volume removed" || c_info "not running"
-rm -rf "$REPO_ROOT/infra/.terraform" "$REPO_ROOT"/infra/terraform.tfstate*
+# Only the pointer to the (now deleted) state. The downloaded providers stay:
+# they are large and have nothing to do with the data.
+rm -f "$REPO_ROOT/infra/.terraform/terraform.tfstate" "$REPO_ROOT"/infra/terraform.tfstate*
 rm -f "$STOP_MARKER"
 
 if [ "$ALL" = 1 ]; then

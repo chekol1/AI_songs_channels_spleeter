@@ -116,6 +116,10 @@ if ! aws_local s3api head-bucket --bucket "$TFSTATE_BUCKET" >/dev/null 2>&1; the
     || die "could not create the state bucket $TFSTATE_BUCKET in Floci"
   c_info "created state bucket $TFSTATE_BUCKET"
 fi
+# Keep downloaded providers outside the clone (the AWS one is several hundred
+# MB): a fresh clone then links to them instead of downloading again.
+export TF_PLUGIN_CACHE_DIR="${TF_PLUGIN_CACHE_DIR:-$SONICLOUD_HOME/terraform-plugins}"
+mkdir -p "$TF_PLUGIN_CACHE_DIR"
 cd "$REPO_ROOT/infra"
 if [ -f terraform.tfstate ]; then
   # From before the state moved into the bucket. It describes a Floci that no
@@ -124,6 +128,7 @@ if [ -f terraform.tfstate ]; then
   c_warn "set aside an old local state file (state now lives in s3://$TFSTATE_BUCKET)"
 fi
 if ! grep -q '"type": *"s3"' .terraform/terraform.tfstate 2>/dev/null; then
+  [ -d .terraform/providers ] || c_info "downloading terraform providers (first time only; slow on a slow link) ..."
   terraform init -input=false -reconfigure >"$SONICLOUD_HOME/terraform-init.log" 2>&1 \
     || { tail -n 30 "$SONICLOUD_HOME/terraform-init.log" >&2; die "terraform init failed"; }
 fi
