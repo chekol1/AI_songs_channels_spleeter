@@ -16,8 +16,11 @@ ACCOUNT_ID="${ACCOUNT_ID:-000000000000}"
 AWS_REGION_LOCAL="${AWS_REGION_LOCAL:-us-east-1}"
 FLOCI_PORT="${FLOCI_PORT:-4566}"
 REGISTRY_PORT="${REGISTRY_PORT:-5100}"
-INGRESS_PORT="${INGRESS_PORT:-80}"
-FLOCI_CONTAINER="${FLOCI_CONTAINER:-sonicloud-floci}"
+# 8088, not 80: on a shared lab server port 80 usually belongs to something
+# else already (here: the lab cluster's Traefik). INGRESS_PORT=80 to override.
+INGRESS_PORT="${INGRESS_PORT:-8088}"
+# Empty means "find it": see resolve_floci_container below.
+FLOCI_CONTAINER="${FLOCI_CONTAINER:-}"
 EKS_CONTAINER="floci-eks-${CLUSTER_NAME}"
 REGISTRY_CONTAINER="${REGISTRY_CONTAINER:-floci-ecr-registry}"
 INGRESS_CONTAINER="${INGRESS_CONTAINER:-sonicloud-ingress}"
@@ -25,6 +28,23 @@ INGRESS_CONTAINER="${INGRESS_CONTAINER:-sonicloud-ingress}"
 UPLOAD_BUCKET="sonic-cloud-music-${ACCOUNT_ID}"
 RESULTS_BUCKET="sonic-cloud-music-results-${ACCOUNT_ID}"
 ECR_HOST="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION_LOCAL}.localhost:${REGISTRY_PORT}"
+
+# --- GitOps (Argo CD) --------------------------------------------------------
+# The manifests Argo CD deploys, and the Argo CD that deploys them. Argo CD is
+# NOT installed by this project: it is the one already running in the lab
+# cluster (k3s) on this server, and it manages SoniCloud's cluster from outside.
+GITOPS_DIR="$LOCAL_DIR/gitops"
+ARGOCD_APP_FILE="$LOCAL_DIR/argocd/sonicloud-local.yaml"
+ARGOCD_APP_NAME="${ARGOCD_APP_NAME:-sonicloud-local}"
+ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-argocd}"
+ARGOCD_KUBECONFIG="${ARGOCD_KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
+ARGOCD_CLUSTER_NAME="${ARGOCD_CLUSTER_NAME:-sonicloud-floci}"
+# Branch Argo CD follows. Empty = whatever the Application file says. Set it to
+# test a feature branch:  GITOPS_REVISION=my-branch bash local-deploy/deploy.sh
+GITOPS_REVISION="${GITOPS_REVISION:-}"
+# auto   = use Argo CD when it is reachable, otherwise apply directly
+# argocd = require Argo CD            direct = never use Argo CD
+DEPLOY_MODE="${DEPLOY_MODE:-auto}"
 
 # --- output ----------------------------------------------------------------
 c_ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
@@ -55,8 +75,47 @@ container_any_ip() {
   docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "$1" 2>/dev/null | awk '{print $1}'
 }
 
+# The Floci container. Its name differs between machines (this compose file
+# calls it sonicloud-floci; a lab server may have renamed it), so look it up by
+# the labels docker compose puts on it, and only then fall back to known names.
+resolve_floci_container() {
+  local name
+  if [ -n "$FLOCI_CONTAINER" ]; then
+    docker inspect "$FLOCI_CONTAINER" >/dev/null 2>&1 \
+      || die "FLOCI_CONTAINER=$FLOCI_CONTAINER is set, but no such container exists"
+    return 0
+  fi
+  name="$(docker ps \
+            --filter "label=com.docker.compose.project.working_dir=$LOCAL_DIR" \
+            --filter "label=com.docker.compose.service=floci" \
+            --format '{{.Names}}' | head -n1)"
+  if [ -z "$name" ]; then
+    for name in sonicloud-floci floci ""; do
+      [ -n "$name" ] && docker inspect "$name" >/dev/null 2>&1 && break
+    done
+  fi
+  [ -n "$name" ] || die "cannot find the Floci container (is it running? docker ps). Set FLOCI_CONTAINER=<name> to point at it."
+  FLOCI_CONTAINER="$name"
+}
+
+# kubectl against the LAB cluster, where Argo CD lives (not SoniCloud's cluster).
+akc() { kubectl --kubeconfig "$ARGOCD_KUBECONFIG" "$@"; }
+
+argocd_available() {
+  have kubectl && [ -r "$ARGOCD_KUBECONFIG" ] \
+    && akc --request-timeout=10s -n "$ARGOCD_NAMESPACE" get deploy argocd-repo-server >/dev/null 2>&1
+}
+
+# Release tag a component is pinned to in the GitOps manifests.
+gitops_tag() {   # gitops_tag <api|web|worker>
+  sed -n "s|^ *image: .*/sonicloud-$1:\([^ ]*\) *$|\1|p" "$GITOPS_DIR/$1.yaml" | head -n1
+}
+
 kc() { docker exec "$EKS_CONTAINER" kubectl "$@"; }
 kcn() { docker exec "$EKS_CONTAINER" kubectl -n "$NAMESPACE" "$@"; }
+# kubectl apply reading the manifest from stdin (the files live on the host,
+# kubectl runs inside the cluster container).
+kc_apply() { docker exec -i "$EKS_CONTAINER" kubectl apply -f - ; }
 
 aws_local() {
   AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test \

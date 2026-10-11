@@ -1,0 +1,30 @@
+# Argo CD Application for the local (Floci) deployment.
+#
+# Tells the Argo CD that already runs in the lab cluster on this server:
+# "watch local-deploy/gitops on the floci-local-deployment branch and keep
+# SoniCloud's cluster in sync with it."
+#
+# deploy.sh applies this for you, after registering SoniCloud's cluster with
+# Argo CD under the name used in `destination` below. It lives outside gitops/
+# so that Argo CD does not manage its own definition.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: sonicloud-local
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/chekol1/AI_songs_channels_spleeter.git
+    targetRevision: floci-local-deployment
+    path: local-deploy/gitops
+  destination:
+    name: sonicloud-floci      # the cluster deploy.sh registers; see lib/common.sh
+    namespace: sonicloud
+  syncPolicy:
+    automated:
+      prune: true              # only resources Argo CD created; the ConfigMap and
+                               # Secret written by deploy.sh are not its to prune
+      selfHeal: true           # a manual change to a Deployment is reverted
+    syncOptions:
+      - CreateNamespace=true

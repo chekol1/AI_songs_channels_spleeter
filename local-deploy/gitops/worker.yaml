@@ -1,4 +1,5 @@
 # Background processor: polls SQS, runs spleeter, uploads stems. No Service.
+# As Argo CD deploys it; see api.yaml for how this folder works.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -14,21 +15,21 @@ spec:
     spec:
       containers:
         - name: worker
-          image: ${ECR_HOST}/sonicloud-worker:latest
-          imagePullPolicy: Always
+          image: 000000000000.dkr.ecr.us-east-1.localhost:5100/sonicloud-worker:local-v0.1.0
+          imagePullPolicy: IfNotPresent
           env:
             - name: AWS_REGION
-              value: ${AWS_REGION_LOCAL}
+              valueFrom: { configMapKeyRef: { name: sonicloud-env, key: AWS_REGION } }
             - name: AWS_ENDPOINT_URL
-              value: http://${FLOCI_IP}:${FLOCI_PORT}
+              valueFrom: { configMapKeyRef: { name: sonicloud-env, key: AWS_ENDPOINT_URL } }
             - name: AWS_ACCESS_KEY_ID
               value: test
             - name: AWS_SECRET_ACCESS_KEY
               value: test
             - name: QUEUE_URL
-              value: ${QUEUE_URL}
+              valueFrom: { configMapKeyRef: { name: sonicloud-env, key: QUEUE_URL } }
             - name: RESULT_BUCKET
-              value: ${RESULTS_BUCKET}
+              valueFrom: { configMapKeyRef: { name: sonicloud-env, key: RESULTS_BUCKET } }
             # spleeter reads: environ.get("MODEL_PATH", "pretrained_models")
             # Pointing it at the PVC is what stops the per-pod re-download.
             - name: MODEL_PATH

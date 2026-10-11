@@ -60,7 +60,7 @@ downloads via a presigned URL. Files never pass through the application servers.
 | `api/` | App tier — Flask API (presigned URLs, job tracking in PostgreSQL) |
 | `app/` | Spleeter worker (SQS consumer) + Dockerfile |
 | `infra/` | All Terraform: VPC, EKS, RDS, S3, SQS, ECR, IAM, Inspector |
-| `k8s/` | Kubernetes manifests: deployments, services, namespace |
+| `local-deploy/gitops/` | Kubernetes manifests that Argo CD deploys from Git |
 | `build_and_push.sh` | Builds and pushes the three images to ECR |
 | `RUNBOOK.md` | Full lifecycle: clone → deploy → smoke test → destroy + troubleshooting table |
 | `DEPLOY_GUIDE.md` | Step-by-step first deployment walkthrough |

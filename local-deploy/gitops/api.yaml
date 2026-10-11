@@ -1,5 +1,12 @@
-# App tier. ${...} placeholders are filled by deploy.sh at apply time -- the
-# addresses differ per machine and per rebuild, so nothing here is hardcoded.
+# App tier, as Argo CD deploys it.
+#
+# This file is static on purpose: Argo CD reads it straight from Git. Anything
+# that differs per machine or per rebuild (container IPs, Cognito IDs, the queue
+# URL) is NOT here. deploy.sh writes those into the ConfigMap "sonicloud-env"
+# and the Secret "sonicloud-secrets", and this manifest only refers to them.
+#
+# The image tag is the release. The build pipeline rewrites it on every
+# release, and that commit is what makes Argo CD roll out a new version.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,41 +22,38 @@ spec:
     spec:
       containers:
         - name: api
-          image: ${ECR_HOST}/sonicloud-api:latest
-          imagePullPolicy: Always
+          image: 000000000000.dkr.ecr.us-east-1.localhost:5100/sonicloud-api:local-v0.1.0
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5000
           env:
             - name: AWS_REGION
-              value: ${AWS_REGION_LOCAL}
-            # Real AWS supplies credentials via the node IAM role / IMDS.
-            # Floci has neither, so they are injected explicitly.
-            #
-            #
-            # Server-side calls only, so this is the container-internal address
-            # and does NOT change when the machine moves network. The browser
-            # never sees it. Presigned URLs are signed separately, for whatever
-            # host the caller used -- see presign_client() in api/app.py.
+              valueFrom: { configMapKeyRef: { name: sonicloud-env, key: AWS_REGION } }
+            # Server-side calls only: the container-internal Floci address. The
+            # browser never sees it. Presigned URLs are signed separately, for
+            # whatever host the caller used -- see presign_client() in api/app.py.
             - name: AWS_ENDPOINT_URL
-              value: http://${FLOCI_IP}:${FLOCI_PORT}
+              valueFrom: { configMapKeyRef: { name: sonicloud-env, key: AWS_ENDPOINT_URL } }
             # Presence of this switches presigning into emulator mode: sign for
             # <the Host the request arrived on>:<this port>. Unset on real AWS.
             - name: S3_PUBLIC_PORT
-              value: "${FLOCI_PORT}"
+              valueFrom: { configMapKeyRef: { name: sonicloud-env, key: S3_PUBLIC_PORT } }
+            # Real AWS supplies credentials via an IAM role. Floci has no IAM,
+            # so the emulator's dummy pair is injected explicitly.
             - name: AWS_ACCESS_KEY_ID
               value: test
             - name: AWS_SECRET_ACCESS_KEY
               value: test
             - name: UPLOAD_BUCKET
-              value: ${UPLOAD_BUCKET}
+              valueFrom: { configMapKeyRef: { name: sonicloud-env, key: UPLOAD_BUCKET } }
             - name: RESULTS_BUCKET
-              value: ${RESULTS_BUCKET}
-            # Tenant identity. The API verifies token signatures against this
-            # pool's JWKS, so these must match the pool terraform created.
+              valueFrom: { configMapKeyRef: { name: sonicloud-env, key: RESULTS_BUCKET } }
+            # The API verifies token signatures against this pool's JWKS, so
+            # these must match the pool terraform created.
             - name: COGNITO_USER_POOL_ID
-              value: ${COGNITO_USER_POOL_ID}
+              valueFrom: { configMapKeyRef: { name: sonicloud-env, key: COGNITO_USER_POOL_ID } }
             - name: COGNITO_CLIENT_ID
-              value: ${COGNITO_CLIENT_ID}
+              valueFrom: { configMapKeyRef: { name: sonicloud-env, key: COGNITO_CLIENT_ID } }
             - name: DB_HOST
               valueFrom: { secretKeyRef: { name: sonicloud-secrets, key: db_host } }
             # Floci proxies RDS on a non-standard port.

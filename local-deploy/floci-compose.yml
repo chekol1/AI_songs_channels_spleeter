@@ -17,6 +17,19 @@ services:
     restart: unless-stopped
     networks: [sonicloud-net]
 
+  # Lets the build machine on the home network push images.
+  # Floci publishes its registry on 127.0.0.1 only, so nothing outside this
+  # host can reach it. This forwards <LAN address>:5101 to it. deploy.sh sets
+  # REGISTRY_LAN_BIND to this host's LAN address; it is never a public address.
+  registry-lan:
+    image: alpine/socat
+    container_name: sonicloud-registry-lan
+    network_mode: host
+    command:
+      - "TCP-LISTEN:${REGISTRY_LAN_PORT:-5101},bind=${REGISTRY_LAN_BIND:-127.0.0.1},fork,reuseaddr"
+      - "TCP:127.0.0.1:${REGISTRY_PORT:-5100}"
+    restart: unless-stopped
+
 volumes:
   floci-data:
 
