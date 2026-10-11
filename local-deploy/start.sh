@@ -19,7 +19,7 @@ fi
 mkdir -p "$SONICLOUD_HOME/logs"
 log="$SONICLOUD_HOME/logs/start-$(date +%Y%m%d-%H%M%S).log"
 # Keep the 20 newest logs.
-ls -1t "$SONICLOUD_HOME/logs"/start-*.log 2>/dev/null | tail -n +20 | xargs -r rm -f
+{ ls -1t "$SONICLOUD_HOME/logs"/start-*.log 2>/dev/null || true; } | tail -n +20 | xargs -r rm -f
 echo "log: $log"
 set +e
 bash "$LOCAL_DIR/deploy.sh" 2>&1 | tee "$log"
