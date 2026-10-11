@@ -87,3 +87,22 @@ resource "aws_security_group" "rds_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
+
+# ---------------------------------------------------------------------------
+# LOCAL DEVIATION: Floci cannot change a repository's scan setting after it
+# exists (PutImageScanningConfiguration is unsupported), and it has no image
+# scanning anyway. This matters when deploy.sh adopts repositories that
+# outlived Floci's data: they come back with scanning off, and Terraform would
+# fail trying to switch it on. Ignore that one attribute locally.
+# ---------------------------------------------------------------------------
+resource "aws_ecr_repository" "worker_app" {
+  lifecycle {
+    ignore_changes = [image_scanning_configuration]
+  }
+}
+
+resource "aws_ecr_repository" "app_tiers" {
+  lifecycle {
+    ignore_changes = [image_scanning_configuration]
+  }
+}
