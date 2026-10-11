@@ -1,0 +1,206 @@
+# Release pipeline for the AWS (EKS) deployment.
+#
+#   push to eks-showcase that touches api/, web/ or worker/
+#     -> next version number (vX.Y.Z)
+#     -> build ONLY the components that changed
+#     -> push the images to ECR under that version (tags are immutable)
+#     -> write the new tag into k8s/ and commit it
+#     -> Argo CD, running in the cluster, sees that commit and rolls it out
+#
+# The pipeline never talks to the cluster. No kubectl, no rollout restart:
+# Git is the only thing that changes what runs. Rolling back = reverting the
+# "release:" commit.
+#
+# Version bump: the last number goes up on every release. Put #minor or #major
+# anywhere in a commit message to raise the middle or the first number instead.
+#
+# Manual run (Actions tab -> Run workflow) = release ALL components as a new
+# version.
+name: Release
+
+on:
+  push:
+    branches: [eks-showcase]
+    paths: ["api/**", "web/**", "worker/**"]
+  workflow_dispatch: {}
+
+# One release at a time; a second push waits instead of racing on the version.
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write   # OIDC: assume the AWS role without stored keys
+  contents: write   # commit the new tag into the manifests, push the git tag
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  AWS_REGION: us-east-1
+  ACCOUNT_ID: "010686621615"
+  TAG_PREFIX: v
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0      # full history: tags for the version, diff for what changed
+
+      - name: Plan the release
+        id: plan
+        env:
+          BEFORE: ${{ github.event.before }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+
+          # --- what changed ---------------------------------------------------
+          if [ "$EVENT" = workflow_dispatch ]; then
+            echo "Manual run: releasing every component."
+            changed="api web worker"
+            messages="$(git log -1 --format=%B "$GITHUB_SHA")"
+          elif [[ -z "$BEFORE" || "$BEFORE" =~ ^0+$ ]] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "No previous commit to compare with: building everything."
+            changed="api web worker"
+            messages="$(git log -1 --format=%B "$GITHUB_SHA")"
+          else
+            changed=""
+            for c in api web worker; do
+              git diff --quiet "$BEFORE" "$GITHUB_SHA" -- "$c/" || changed="$changed $c"
+            done
+            messages="$(git log --format=%B "$BEFORE..$GITHUB_SHA")"
+          fi
+          changed="$(echo $changed)"
+          if [ -z "$changed" ]; then
+            echo "Nothing under api/, web/ or worker/ differs. No release."
+            echo "changed=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # --- next version ---------------------------------------------------
+          # Highest existing git tag; before the first release, the highest
+          # version the manifests already mention.
+          last="$(git tag -l "${TAG_PREFIX}[0-9]*" | sed "s/^${TAG_PREFIX}//" \
+                    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)"
+          if [ -z "$last" ]; then
+            last="$(grep -rhoE "sonicloud-(api|web|worker):${TAG_PREFIX}[0-9]+\.[0-9]+\.[0-9]+" k8s \
+                      | sed "s/.*:${TAG_PREFIX}//" | sort -V | tail -n1 || true)"
+          fi
+          last="${last:-0.0.0}"
+          IFS=. read -r major minor patch <<< "$last"
+          if   grep -q '#major' <<< "$messages"; then major=$((major+1)); minor=0; patch=0
+          elif grep -q '#minor' <<< "$messages"; then minor=$((minor+1)); patch=0
+          else patch=$((patch+1)); fi
+          version="${TAG_PREFIX}${major}.${minor}.${patch}"
+
+          echo "Previous version: $last"
+          echo "This release:     $version"
+          echo "Components:       $changed"
+          echo "changed=$changed"  >> "$GITHUB_OUTPUT"
+          echo "version=$version"  >> "$GITHUB_OUTPUT"
+
+      - name: Assume AWS role via OIDC (no stored keys)
+        if: steps.plan.outputs.changed != ''
+        id: aws
+        # The role itself is created by Terraform, so it is missing too while
+        # the environment is destroyed. The next step turns that into a notice.
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::010686621615:role/sonicloud-github-actions
+          aws-region: ${{ env.AWS_REGION }}
+
+      # The showcase environment is destroyed between demos to save money.
+      # With no registry there is nothing to release to, and that is not a failure.
+      - name: Check the registry exists
+        if: steps.plan.outputs.changed != ''
+        id: infra
+        run: |
+          if [ "${{ steps.aws.outcome }}" = success ] && aws ecr describe-repositories --repository-names sonicloud-api sonicloud-web sonicloud-worker >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::The AWS role or the ECR repositories do not exist (infrastructure is destroyed). Nothing released; no version number used."
+          fi
+
+      - name: Build and push images
+        if: steps.plan.outputs.changed != '' && steps.infra.outputs.exists == 'true'
+        env:
+          CHANGED: ${{ steps.plan.outputs.changed }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          REGISTRY="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$REGISTRY"
+
+          for c in $CHANGED; do
+            image="$REGISTRY/sonicloud-$c:$VERSION"
+            # The repositories are immutable, so a second push of the same tag
+            # would be rejected by ECR anyway. Say so clearly, before building.
+            if aws ecr describe-images --repository-name "sonicloud-$c" --image-ids imageTag="$VERSION" >/dev/null 2>&1; then
+              echo "::error::sonicloud-$c:$VERSION already exists in ECR. Refusing to overwrite a release."
+              exit 1
+            fi
+            echo "::group::build sonicloud-$c:$VERSION"
+            docker build --pull -t "$image" "$c"
+            echo "::endgroup::"
+            docker push "$image"
+            docker image rm "$image" >/dev/null 2>&1 || true   # the worker image is ~4GB; keep the runner's disk free
+          done
+
+      - name: Write the new tag into the manifests
+        if: steps.plan.outputs.changed != '' && steps.infra.outputs.exists == 'true'
+        env:
+          CHANGED: ${{ steps.plan.outputs.changed }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          bump() {
+            for c in $CHANGED; do
+              f="k8s/$c.yaml"
+              sed -i "s|\(/sonicloud-$c:\)[^ ]*|\1$VERSION|" "$f"
+              grep -q "/sonicloud-$c:$VERSION" "$f" \
+                || { echo "::error::could not set the image tag in $f"; exit 1; }
+              git add "$f"
+            done
+          }
+
+          # Someone may have pushed while the images were building. Start from
+          # the newest branch tip each time and retry a few times.
+          for attempt in 1 2 3 4 5; do
+            git fetch -q origin "$GITHUB_REF_NAME"
+            git reset -q --hard "origin/$GITHUB_REF_NAME"
+            bump
+            git commit -q -m "release: $VERSION (${CHANGED// /, })" \
+                          -m "Built from $GITHUB_SHA by the Release workflow."
+            if git push -q origin "HEAD:refs/heads/$GITHUB_REF_NAME"; then
+              git tag "$VERSION"
+              git push -q origin "refs/tags/$VERSION"
+              echo "Committed and tagged $VERSION."
+              exit 0
+            fi
+            echo "Push was rejected (attempt $attempt), retrying ..."
+            sleep $((attempt * 3))
+          done
+          echo "::error::could not push the release commit after 5 attempts"
+          exit 1
+
+      - name: Summary
+        if: steps.plan.outputs.changed != '' && steps.infra.outputs.exists == 'true'
+        run: |
+          {
+            echo "### Released ${{ steps.plan.outputs.version }}"
+            echo ""
+            echo "Components: ${{ steps.plan.outputs.changed }}"
+            echo ""
+            echo "Argo CD picks this up from Git within a few minutes."
+          } >> "$GITHUB_STEP_SUMMARY"

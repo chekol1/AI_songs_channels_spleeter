@@ -20,7 +20,9 @@ spec:
     namespace: sonicloud
   syncPolicy:
     automated:
-      prune: false     # never auto-delete resources
-      selfHeal: false  # don't revert manual changes (the CI's rollout-restart must survive)
+      prune: true      # a resource removed from Git is removed from the cluster
+      selfHeal: true   # a manual change in the cluster is reverted to what Git says.
+                       # Safe now: the release pipeline no longer touches the cluster,
+                       # it only commits a new image tag here.
     syncOptions:
       - CreateNamespace=true

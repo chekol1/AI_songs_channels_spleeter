@@ -58,7 +58,7 @@ downloads via a presigned URL. Files never pass through the application servers.
 |---|---|
 | `web/` | Web tier — React (Vite) built and served by nginx (multi-stage Dockerfile) |
 | `api/` | App tier — Flask API (presigned URLs, job tracking in PostgreSQL) |
-| `app/` | Spleeter worker (SQS consumer) + Dockerfile |
+| `worker/` | Spleeter worker (SQS consumer) + Dockerfile. `app/` is the old single-tenant version and is no longer built. |
 | `infra/` | All Terraform: VPC, EKS, RDS, S3, SQS, ECR, IAM, Inspector |
 | `k8s/` | Kubernetes manifests: deployments, services, namespace |
 | `build_and_push.sh` | Builds and pushes the three images to ECR |

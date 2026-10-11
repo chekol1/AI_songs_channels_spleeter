@@ -29,7 +29,8 @@ terraform apply                         # ~15 min, type yes
 # 2. Connect kubectl to the new cluster (required every cycle - new cluster, new address)
 aws eks update-kubeconfig --region us-east-1 --name sonicloud-eks
 
-# 3. Build & push the 3 images
+# 3. Fill the new, empty ECR with the versions pinned in k8s/*.yaml
+#    (day to day the Release workflow builds images; this is only for a fresh ECR)
 cd .. && ./build_and_push.sh
 
 # 4. Namespace + DB secret (must exist BEFORE the app deploys)

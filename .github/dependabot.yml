@@ -8,12 +8,6 @@ updates:
     schedule:
       interval: "weekly"
 
-  - package-ecosystem: "pip"            # app/requirements.txt (worker)
-    directory: "/app"
-    target-branch: "eks-showcase"
-    schedule:
-      interval: "weekly"
-
   - package-ecosystem: "npm"            # web/package.json
     directory: "/web"
     target-branch: "eks-showcase"
@@ -21,7 +15,7 @@ updates:
       interval: "weekly"
 
   - package-ecosystem: "docker"         # base images in Dockerfiles
-    directories: ["/api", "/app", "/web"]
+    directories: ["/api", "/worker", "/web"]
     target-branch: "eks-showcase"
     schedule:
       interval: "weekly"
