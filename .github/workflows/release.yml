@@ -1,6 +1,6 @@
 # Release pipeline for the AWS (EKS) deployment.
 #
-#   push to eks-showcase that touches api/, web/ or worker/
+#   push to aws-eks-deployment that touches api/, web/ or worker/
 #     -> next version number (vX.Y.Z)
 #     -> build ONLY the components that changed
 #     -> push the images to ECR under that version (tags are immutable)
@@ -20,7 +20,7 @@ name: Release
 
 on:
   push:
-    branches: [eks-showcase]
+    branches: [aws-eks-deployment]
     paths: ["api/**", "web/**", "worker/**"]
   workflow_dispatch: {}
 
