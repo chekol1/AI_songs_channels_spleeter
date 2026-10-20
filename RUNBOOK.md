@@ -12,7 +12,7 @@ Prereqs (one-time): AWS CLI + admin profile, Terraform ≥ 1.5, kubectl, Docker 
 ```bash
 cd /c/dev
 rm -rf AI_songs_channels_spleeter
-git clone -b eks-showcase https://github.com/chekol1/AI_songs_channels_spleeter.git
+git clone -b aws-eks-deployment https://github.com/chekol1/AI_songs_channels_spleeter.git
 cd AI_songs_channels_spleeter
 ```
 

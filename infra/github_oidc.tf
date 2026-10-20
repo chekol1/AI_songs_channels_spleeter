@@ -89,5 +89,5 @@ output "github_actions_role_arn" {
 #   InvalidArgument: POST requires either ?uploads, ?uploadId, ?restore or
 #   ?select parameter
 # They are only meaningful against a real EKS control plane, so they are absent
-# on this branch. See the eks-showcase branch for the real-AWS version.
+# on this branch. See the aws-eks-deployment branch for the real-AWS version.
 # ---------------------------------------------------------------------------

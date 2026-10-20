@@ -2,7 +2,7 @@ name: Build & Deploy
 
 on:
   push:
-    branches: [eks-showcase]
+    branches: [aws-eks-deployment]
     paths: ["api/**", "web/**", "app/**"]
   workflow_dispatch: {}   # manual run = rebuild everything
 
