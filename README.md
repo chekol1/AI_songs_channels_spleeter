@@ -72,7 +72,7 @@ downloads via a presigned URL. Files never pass through the application servers.
 Prereqs: AWS CLI (admin profile), Terraform ≥ 1.5, kubectl, Docker Desktop.
 
 ```bash
-git clone -b eks-showcase https://github.com/chekol1/AI_songs_channels_spleeter.git
+git clone -b aws-eks-deployment https://github.com/chekol1/AI_songs_channels_spleeter.git
 cd AI_songs_channels_spleeter
 # then follow RUNBOOK.md (deploy ≈ 20 min, destroy ≈ 10 min)
 ```

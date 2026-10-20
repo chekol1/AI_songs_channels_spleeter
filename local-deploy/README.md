@@ -4,7 +4,7 @@ Run the whole SoniCloud stack on one Linux VM against
 [Floci](https://github.com/hecodes2much/floci), a local AWS emulator.
 **No AWS account, no cloud spend.**
 
-This branch is the local variant of `eks-showcase`. The real-AWS version lives
+This branch is the local variant of `aws-eks-deployment`. The real-AWS version lives
 there; do not deploy this branch to AWS.
 
 ```bash
@@ -137,7 +137,7 @@ Spleeter really runs and produces real audio stems.
 - **EKS access-entry APIs are not routed**, so those four resources and the
   cluster's `access_config` block are absent on this branch.
 
-## Differences from `eks-showcase`
+## Differences from `aws-eks-deployment`
 
 | Change | Why |
 |---|---|
@@ -151,7 +151,7 @@ Spleeter really runs and produces real audio stems.
 | `local-deploy/` | the installer, orchestrator and templated manifests |
 
 The `api` and `nginx` changes are genuine bugs that affect real AWS too, but
-they are only applied here — `eks-showcase` is untouched.
+they are only applied here — `aws-eks-deployment` is untouched.
 
 ## Design notes
 
